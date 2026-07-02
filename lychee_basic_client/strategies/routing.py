@@ -25,6 +25,11 @@ class RoutePolicy:
             return path[1]
         return None
 
+    def profile_next_hop(
+        self, state: GameState, current: str, target: str
+    ) -> Optional[str]:
+        return self._profile_next_hop(state.game_map, current, target)
+
     def _profile_next_hop(
         self, game_map: GameMap, current: str, target: str
     ) -> Optional[str]:

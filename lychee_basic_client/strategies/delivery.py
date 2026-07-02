@@ -93,6 +93,10 @@ class DeliveryStrategy:
             next_node = self._route_policy.next_hop(state, current, mandatory_target)
             return [move(next_node)] if next_node else []
 
+        profile_action = self._mandatory_profile_action_if_needed(state, current, gate)
+        if profile_action:
+            return [profile_action]
+
         task_target = select_task_target(state, current, self._rejected_task_ids)
         if task_target is not None and task_target.stand_node_id == current:
             return [claim_task(task_target.task_id)]
@@ -234,6 +238,19 @@ class DeliveryStrategy:
         if current == state.game_map.start_node_id:
             return initial_transfer
         return None
+
+    def _mandatory_profile_action_if_needed(
+        self, state: GameState, current: str, gate: str
+    ) -> Optional[dict[str, Any]]:
+        if current not in {"S02", "S04", "S05"}:
+            return None
+        next_node = self._route_policy.profile_next_hop(state, current, gate)
+        if next_node is None:
+            return None
+        blocking_action = self._blocking_action_if_needed(state, next_node)
+        if blocking_action:
+            return blocking_action
+        return move(next_node)
 
 
 def _should_bind_break_order_to_verify(state: GameState) -> bool:

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from lychee_basic_client.config import Config
-from lychee_basic_client.models.state import GameState
+from lychee_basic_client.models.state import GameState, NodeState
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.delivery import DeliveryStrategy
 from lychee_basic_client.strategies.routing import RoutePolicy
@@ -20,6 +20,8 @@ def _state(
     bad_fruit: int = 0,
     freshness: float = 90,
     break_order_ready: bool = False,
+    tasks: Optional[list[dict[str, Any]]] = None,
+    nodes: Optional[list[dict[str, Any]]] = None,
     events: Optional[list[dict[str, Any]]] = None,
 ) -> GameState:
     map_config = json.loads(Path("example_data/map_config.json").read_text(encoding="utf-8"))
@@ -44,11 +46,20 @@ def _state(
                     "breakOrderReady": break_order_ready,
                 }
             ],
+            "tasks": tasks or [],
+            "nodes": map_config["nodes"],
             "events": events or [],
         },
         1001,
     )
     state.events = events or []
+    if nodes is not None:
+        state.nodes = {
+            node["nodeId"]: NodeState.from_raw(node)
+            for node in nodes
+            if node.get("nodeId")
+        }
+    state.tasks = tasks or []
     return state
 
 
@@ -88,6 +99,68 @@ class DeliveryStrategyTests(unittest.TestCase):
         )
         self.assertEqual(
             [{"action": "MOVE", "targetNodeId": "S04"}],
+            strategy.decide(StrategyContext.from_state(completed)),
+        )
+
+    def test_water_route_is_not_diverted_to_land_task_after_s02(self) -> None:
+        strategy = self._strategy()
+        state = _state("S02")
+        strategy.on_start(state)
+        strategy.decide(StrategyContext.from_state(state))
+
+        completed = _state(
+            "S02",
+            tasks=[
+                {
+                    "taskId": "task-s03",
+                    "taskTemplateId": "T01",
+                    "nodeId": "S03",
+                    "score": 30,
+                    "active": True,
+                    "processRound": 3,
+                }
+            ],
+            events=[
+                {
+                    "type": "PROCESS_COMPLETE",
+                    "payload": {"playerId": 1001, "targetNodeId": "S02"},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S04"}],
+            strategy.decide(StrategyContext.from_state(completed)),
+        )
+
+    def test_water_route_continues_from_dock_to_water_station(self) -> None:
+        strategy = self._strategy()
+        state = _state("S04")
+        strategy.on_start(state)
+        strategy.decide(StrategyContext.from_state(state))
+
+        completed = _state(
+            "S04",
+            tasks=[
+                {
+                    "taskId": "task-s07",
+                    "taskTemplateId": "T02",
+                    "nodeId": "S07",
+                    "score": 30,
+                    "active": True,
+                    "processRound": 4,
+                }
+            ],
+            events=[
+                {
+                    "type": "PROCESS_COMPLETE",
+                    "payload": {"playerId": 1001, "targetNodeId": "S04"},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S05"}],
             strategy.decide(StrategyContext.from_state(completed)),
         )
 
