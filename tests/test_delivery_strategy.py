@@ -13,15 +13,19 @@ from lychee_basic_client.strategies.routing import RoutePolicy
 def _state(
     node_id: str,
     *,
+    round_no: int = 1,
     phase: str = "NORMAL",
     verified: bool = False,
+    good_fruit: int = 100,
+    bad_fruit: int = 0,
+    freshness: float = 90,
     events: Optional[list[dict[str, Any]]] = None,
 ) -> GameState:
     map_config = json.loads(Path("example_data/map_config.json").read_text(encoding="utf-8"))
     state = GameState.from_start(
         {
             "matchId": "match-real-map",
-            "round": 1,
+            "round": round_no,
             "phase": phase,
             "nodes": map_config["nodes"],
             "edges": map_config["edges"],
@@ -33,8 +37,9 @@ def _state(
                     "state": "IDLE",
                     "currentNodeId": node_id,
                     "verified": verified,
-                    "goodFruit": 100,
-                    "freshness": 90,
+                    "goodFruit": good_fruit,
+                    "badFruit": bad_fruit,
+                    "freshness": freshness,
                 }
             ],
             "events": events or [],
@@ -84,6 +89,54 @@ class DeliveryStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(completed)),
         )
 
+    def test_board_station_uses_process_action(self) -> None:
+        strategy = self._strategy()
+        state = _state("S04")
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "PROCESS", "targetNodeId": "S04"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_reprocesses_fixed_station_after_revisiting(self) -> None:
+        strategy = self._strategy()
+        strategy.on_start(_state("S02"))
+
+        self.assertEqual(
+            [{"action": "PROCESS", "targetNodeId": "S02"}],
+            strategy.decide(StrategyContext.from_state(_state("S02"))),
+        )
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S02",
+                    events=[
+                        {
+                            "type": "PROCESS_COMPLETE",
+                            "payload": {"playerId": 1001, "targetNodeId": "S02"},
+                        }
+                    ],
+                )
+            )
+        )
+        strategy.decide(StrategyContext.from_state(_state("S03")))
+
+        self.assertEqual(
+            [{"action": "PROCESS", "targetNodeId": "S02"}],
+            strategy.decide(StrategyContext.from_state(_state("S02"))),
+        )
+
+    def test_unverified_terminal_returns_to_gate(self) -> None:
+        strategy = self._strategy()
+        state = _state("S15", phase="RUSH", verified=False)
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S14"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
     def test_waits_for_rush_before_gate_verification(self) -> None:
         strategy = self._strategy()
         state = _state("S14")
@@ -98,6 +151,16 @@ class DeliveryStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [{"action": "VERIFY_GATE", "targetNodeId": "S14"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_late_gate_verification_binds_break_order_when_affordable(self) -> None:
+        strategy = self._strategy()
+        state = _state("S14", round_no=565, phase="RUSH", bad_fruit=2)
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "VERIFY_GATE", "targetNodeId": "S14", "rushTactic": "BREAK_ORDER"}],
             strategy.decide(StrategyContext.from_state(state)),
         )
 

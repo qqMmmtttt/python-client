@@ -5,6 +5,7 @@ from .delivery import DeliveryStrategy
 from .pipeline import StrategyPipeline
 from .resources import ResourceStrategy
 from .routing import RoutePolicy
+from .rush import RushStrategy
 from .tasks import TaskStrategy
 
 
@@ -15,6 +16,7 @@ def build_strategy(config: Config) -> StrategyPipeline:
             CombatStrategy(),
             TaskStrategy(),
             ResourceStrategy(),
+            RushStrategy(),
             DeliveryStrategy(route_policy),
         ]
     )

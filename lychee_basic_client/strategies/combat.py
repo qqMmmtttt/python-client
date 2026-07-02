@@ -1,6 +1,7 @@
 from typing import Any
 
 from lychee_basic_client.protocol.actions import window_card
+from lychee_basic_client.rules.buffs import has_move_buff
 from lychee_basic_client.strategies.context import StrategyContext
 
 
@@ -49,7 +50,4 @@ def _has_speed_payment(player: dict[str, Any]) -> bool:
     resources = player.get("resources") or {}
     if resources.get("FAST_HORSE", 0) > 0 or resources.get("SHORT_HORSE", 0) > 0:
         return True
-    for buff in player.get("buffs") or []:
-        if buff.get("type") in {"FAST_HORSE", "SHORT_HORSE", "RUSH_SPEED"}:
-            return True
-    return False
+    return has_move_buff(player)

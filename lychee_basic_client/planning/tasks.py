@@ -6,8 +6,8 @@ from lychee_basic_client.planning.estimates import estimate_delivery_rounds, est
 
 TASK_SCORE_GOAL = 90
 BONUS_TASK_SCORE_GOAL = 110
-TASK_CUTOFF_ROUND = 390
-DELIVERY_SAFETY_MARGIN = 55
+TASK_CUTOFF_ROUND = 370
+DELIVERY_SAFETY_MARGIN = 75
 
 HIGH_VALUE_TEMPLATES = {"T01", "T02", "T04", "T06", "T08", "T11"}
 TASK_TEMPLATE_PRIORITY = {
@@ -52,13 +52,18 @@ def should_pursue_tasks(state: GameState, current_node_id: str) -> bool:
     return state.round_no + delivery_rounds + DELIVERY_SAFETY_MARGIN < 600
 
 
-def find_claimable_task_here(state: GameState) -> Optional[dict[str, Any]]:
+def find_claimable_task_here(
+    state: GameState, excluded_task_ids: Optional[set[str]] = None
+) -> Optional[dict[str, Any]]:
     player = state.me
     if player is None or not player.current_node_id:
         return None
+    excluded_task_ids = excluded_task_ids or set()
 
     candidates = []
     for task in state.tasks:
+        if str(task.get("taskId") or "") in excluded_task_ids:
+            continue
         if not is_task_available(task, state.player_id, state.round_no):
             continue
         stand_nodes = task_stand_nodes(state, task)
@@ -74,12 +79,17 @@ def find_claimable_task_here(state: GameState) -> Optional[dict[str, Any]]:
     return candidates[0]
 
 
-def select_task_target(state: GameState, current_node_id: str) -> Optional[TaskTarget]:
+def select_task_target(
+    state: GameState, current_node_id: str, excluded_task_ids: Optional[set[str]] = None
+) -> Optional[TaskTarget]:
     if not should_pursue_tasks(state, current_node_id):
         return None
+    excluded_task_ids = excluded_task_ids or set()
 
     candidates: list[TaskTarget] = []
     for task in state.tasks:
+        if str(task.get("taskId") or "") in excluded_task_ids:
+            continue
         if not is_task_available(task, state.player_id, state.round_no):
             continue
         if not is_task_affordable(state, task):
@@ -98,15 +108,20 @@ def select_task_target(state: GameState, current_node_id: str) -> Optional[TaskT
     return candidates[0]
 
 
-def find_t04_for_obstacle(state: GameState, obstacle_node_id: str) -> Optional[dict[str, Any]]:
+def find_t04_for_obstacle(
+    state: GameState, obstacle_node_id: str, excluded_task_ids: Optional[set[str]] = None
+) -> Optional[dict[str, Any]]:
     player = state.me
     if player is None or not player.current_node_id:
         return None
+    excluded_task_ids = excluded_task_ids or set()
     if player.current_node_id not in {obstacle_node_id, *state.game_map.neighbors(obstacle_node_id)}:
         return None
 
     for task in state.tasks:
         if str(task.get("taskTemplateId") or "") != "T04":
+            continue
+        if str(task.get("taskId") or "") in excluded_task_ids:
             continue
         if task.get("nodeId") != obstacle_node_id:
             continue

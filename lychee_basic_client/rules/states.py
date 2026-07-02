@@ -1,0 +1,13 @@
+ROUTE_EDGE_STATES = frozenset({"MOVING", "WAITING"})
+
+NODE_BUSY_STATES = frozenset(
+    {
+        "PROCESSING",
+        "CONTESTING",
+        "RESTING",
+        "FORCED_PASSING",
+        "VERIFYING",
+    }
+)
+
+MAIN_ACTION_BUSY_STATES = ROUTE_EDGE_STATES | NODE_BUSY_STATES

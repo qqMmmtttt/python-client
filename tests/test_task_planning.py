@@ -100,6 +100,31 @@ class TaskPlanningTests(unittest.TestCase):
             TaskStrategy().decide(StrategyContext.from_state(state)),
         )
 
+    def test_task_strategy_does_not_repeat_rejected_task(self) -> None:
+        task = {
+            "taskId": "task-rejected",
+            "taskTemplateId": "T01",
+            "nodeId": "S03",
+            "score": 30,
+            "active": True,
+        }
+        strategy = TaskStrategy()
+        strategy.on_start(_state("S03", tasks=[task]))
+        rejected_state = _state("S03", tasks=[task])
+        rejected_state.events = [
+            {
+                "type": "ACTION_REJECTED",
+                "payload": {
+                    "playerId": 1001,
+                    "action": "CLAIM_TASK",
+                    "taskId": "task-rejected",
+                    "errorCode": "OBJECT_BUSY",
+                },
+            }
+        ]
+
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(rejected_state)))
+
     def test_delivery_routes_to_reachable_task_before_gate_when_safe(self) -> None:
         task = {
             "taskId": "task-t02",

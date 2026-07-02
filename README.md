@@ -38,6 +38,8 @@ lychee_basic_client/
 
 后续可以在 `strategies/` 下继续增强任务选择、资源使用、窗口博弈、小分队和对抗策略。
 
+更详细的工程说明见 `docs/architecture.md`，当前策略说明见 `docs/strategy.md`。
+
 路线策略通过 `--route-profile` 控制：
 
 - `auto`：默认值。第一轮地图签名匹配时使用保守路线，否则回退到通用动态图搜索。
