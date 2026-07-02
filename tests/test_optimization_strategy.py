@@ -119,6 +119,26 @@ class OptimizationStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(state)),
         )
 
+    def test_squad_strategy_weakens_future_enemy_guard_before_scouting(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S09",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 4, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SQUAD_WEAKEN", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,10 +11,10 @@ from lychee_basic_client.protocol.actions import (
     claim_task,
     move,
     process,
-    set_guard,
     verify_gate,
 )
-from lychee_basic_client.rules.states import MAIN_ACTION_BUSY_STATES, NODE_BUSY_STATES, ROUTE_EDGE_STATES
+from lychee_basic_client.rules.blocking import enemy_guard_at
+from lychee_basic_client.rules.states import NODE_BUSY_STATES, ROUTE_EDGE_STATES
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.routing import RoutePolicy
 
@@ -30,6 +30,7 @@ class DeliveryStrategy:
         self._rejected_task_ids: set[str] = set()
         self._object_busy_nodes: set[str] = set()
         self._object_busy_recover_round: int = 0
+        self._blocked_move_targets: set[str] = set()
 
     def on_start(self, state: GameState) -> None:
         self._completed_process_nodes.clear()
@@ -38,6 +39,7 @@ class DeliveryStrategy:
         self._rejected_task_ids.clear()
         self._object_busy_nodes.clear()
         self._object_busy_recover_round = 0
+        self._blocked_move_targets.clear()
         return None
 
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
@@ -148,31 +150,39 @@ class DeliveryStrategy:
             return None
         node = state.nodes.get(target_node_id)
         if node is None:
+            if target_node_id in self._blocked_move_targets:
+                return forced_pass(target_node_id)
             return None
+
+        guard = enemy_guard_at(node, player)
+        if guard is not None:
+            return self._enemy_guard_action(state, target_node_id, guard.defense, node.has_obstacle)
 
         if node.has_obstacle:
             t04 = find_t04_for_obstacle(state, target_node_id, self._rejected_task_ids)
-            if t04 is not None:
+            if t04 is not None and _has_delivery_slack(state, target_node_id, margin=80):
                 return claim_task(t04["taskId"])
-        if node.has_obstacle:
-            if player.good_fruit > 0 and _has_delivery_slack(state, target_node_id, margin=38):
+            if _should_clear_obstacle(state, target_node_id):
                 return clear(target_node_id)
             return forced_pass(target_node_id)
 
-        guard = node.guard or {}
-        owner_team_id = guard.get("ownerTeamId")
-        defense = int(guard.get("defense") or 0)
-        if owner_team_id and owner_team_id != player.team_id and defense > 0:
-            if _has_delivery_slack(state, target_node_id, margin=30) and (
-                player.good_fruit > 5 or player.bad_fruit > 0
-            ):
-                return break_guard(
-                    target_node_id,
-                    good_fruit=1 if player.good_fruit > 5 else 0,
-                    bad_fruit=1 if player.bad_fruit > 0 else 0,
-                )
-            return forced_pass(target_node_id)
         return None
+
+    def _enemy_guard_action(
+        self,
+        state: GameState,
+        target_node_id: str,
+        defense: int,
+        has_obstacle: bool,
+    ) -> dict[str, Any]:
+        payment = _break_guard_payment(state, defense)
+        if (
+            payment is not None
+            and not has_obstacle
+            and _has_delivery_slack(state, target_node_id, margin=18)
+        ):
+            return break_guard(target_node_id, **payment)
+        return forced_pass(target_node_id)
 
     def _observe_process_completion(self, context: StrategyContext) -> None:
         state = context.state
@@ -198,6 +208,14 @@ class DeliveryStrategy:
                 task_id = _rejected_task_id(rejected.raw)
                 if task_id:
                     self._rejected_task_ids.add(task_id)
+            if rejected.action == "MOVE" and rejected.error_code in {
+                "MOVE_BLOCKED_BY_GUARD",
+                "MOVE_BLOCKED_BY_OBSTACLE",
+                "BLOCKED",
+            }:
+                target_node_id = _rejected_target_node(rejected.raw)
+                if target_node_id:
+                    self._blocked_move_targets.add(target_node_id)
 
     def _observe_new_settled_node(self, state: GameState, current: str) -> None:
         if current == self._last_settled_node:
@@ -242,6 +260,34 @@ def _has_delivery_slack(state: GameState, from_node_id: str, margin: int) -> boo
     return state.round_no + estimate_delivery_rounds(state, from_node_id, player.verified) + margin < 600
 
 
+def _should_clear_obstacle(state: GameState, target_node_id: str) -> bool:
+    player = state.me
+    if player is None or player.good_fruit <= 1:
+        return False
+    if state.round_no >= 430:
+        return False
+    return _has_delivery_slack(state, target_node_id, margin=55)
+
+
+def _break_guard_payment(state: GameState, defense: int) -> Optional[dict[str, int]]:
+    player = state.me
+    if player is None or defense <= 0:
+        return None
+
+    bad_fruit = min(2, player.bad_fruit, defense)
+    remaining = defense - bad_fruit
+    max_good = min(2, max(0, player.good_fruit - 1))
+    good_fruit = min(max_good, remaining)
+    if bad_fruit + good_fruit < defense:
+        return None
+    return {"good_fruit": good_fruit, "bad_fruit": bad_fruit}
+
+
 def _rejected_task_id(raw: dict[str, Any]) -> str:
     payload = raw.get("payload") or raw
     return str(payload.get("taskId") or "")
+
+
+def _rejected_target_node(raw: dict[str, Any]) -> str:
+    payload = raw.get("payload") or raw
+    return str(payload.get("targetNodeId") or payload.get("nodeId") or "")

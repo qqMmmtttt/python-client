@@ -88,28 +88,75 @@ class WeatherEventsRoutingTests(unittest.TestCase):
 
         self.assertEqual("S03", policy.next_hop(state, "S02", "S14"))
 
+    def test_route_policy_accounts_for_enemy_obstacle_residue_tax(self) -> None:
+        state = _final_like_state(
+            nodes=[
+                {
+                    "nodeId": "B",
+                    "obstacleResidue": {
+                        "clearedByTeamId": "BLUE",
+                        "remainRound": 20,
+                        "taxRound": 6,
+                    },
+                }
+            ],
+            edges=[
+                {"fromNodeId": "A", "toNodeId": "B", "routeType": "ROAD", "distance": 1},
+                {"fromNodeId": "B", "toNodeId": "G", "routeType": "ROAD", "distance": 1},
+                {"fromNodeId": "A", "toNodeId": "C", "routeType": "ROAD", "distance": 2},
+                {"fromNodeId": "C", "toNodeId": "G", "routeType": "ROAD", "distance": 2},
+                {"fromNodeId": "G", "toNodeId": "T", "routeType": "ROAD", "distance": 1},
+            ],
+        )
+        policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="auto"))
 
-def _final_like_state() -> GameState:
-    return GameState.from_start(
+        self.assertEqual("C", policy.next_hop(state, "A", "G"))
+
+
+def _final_like_state(
+    nodes: list[dict] | None = None,
+    edges: list[dict] | None = None,
+) -> GameState:
+    base_nodes = [
+        {"nodeId": "A", "type": "START"},
+        {"nodeId": "B"},
+        {"nodeId": "C"},
+        {"nodeId": "G", "type": "GATE"},
+        {"nodeId": "T", "type": "FINISH"},
+    ]
+    base_edges = edges or [
+        {"fromNodeId": "A", "toNodeId": "B", "routeType": "ROAD", "distance": 1},
+        {"fromNodeId": "B", "toNodeId": "G", "routeType": "ROAD", "distance": 1},
+        {"fromNodeId": "G", "toNodeId": "T", "routeType": "ROAD", "distance": 1},
+    ]
+    game_map = GameState.from_start(
         {
             "matchId": "match-final-map",
             "round": 1,
-            "nodes": [
-                {"nodeId": "A", "type": "START"},
-                {"nodeId": "B"},
-                {"nodeId": "G", "type": "GATE"},
-                {"nodeId": "T", "type": "FINISH"},
-            ],
-            "edges": [
-                {"fromNodeId": "A", "toNodeId": "B", "routeType": "ROAD", "distance": 1},
-                {"fromNodeId": "B", "toNodeId": "G", "routeType": "ROAD", "distance": 1},
-                {"fromNodeId": "G", "toNodeId": "T", "routeType": "ROAD", "distance": 1},
-            ],
+            "nodes": base_nodes,
+            "edges": base_edges,
+            "players": [],
+        },
+        1001,
+    ).game_map
+    return GameState.from_inquire(
+        {
+            "matchId": "match-final-map",
+            "round": 1,
+            "phase": "NORMAL",
             "players": [
                 {"playerId": 1001, "teamId": "RED", "state": "IDLE", "currentNodeId": "A"}
             ],
+            "nodes": nodes or [],
+            "edges": base_edges,
+            "tasks": [],
+            "contests": [],
+            "events": [],
+            "actionResults": [],
+            "weather": {},
         },
         1001,
+        game_map,
     )
 
 

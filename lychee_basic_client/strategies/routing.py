@@ -5,6 +5,7 @@ from lychee_basic_client.config import Config
 from lychee_basic_client.models.map import Edge, GameMap
 from lychee_basic_client.models.state import GameState
 from lychee_basic_client.planning.route_profiles import FIRST_ROUND_SAFE_ROUTE
+from lychee_basic_client.rules.blocking import enemy_guard_at, obstacle_residue_tax_round
 
 
 class RoutePolicy:
@@ -85,11 +86,8 @@ def _edge_cost(state: GameState, edge: Edge, neighbor: str) -> float:
     node = state.nodes.get(neighbor)
     if node is not None and node.has_obstacle:
         cost += 250_000
-    player = state.me
-    guard = node.guard if node is not None else None
-    if player is not None and guard:
-        owner_team_id = guard.get("ownerTeamId")
-        defense = int(guard.get("defense") or 0)
-        if owner_team_id and owner_team_id != player.team_id and defense > 0:
-            cost += 180_000 + defense * 30_000
+    cost += obstacle_residue_tax_round(node, state.me) * 1000
+    guard = enemy_guard_at(node, state.me)
+    if guard is not None:
+        cost += 180_000 + guard.defense * 30_000
     return cost

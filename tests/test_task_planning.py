@@ -20,8 +20,11 @@ def _state(
     *,
     round_no: int = 1,
     task_score: int = 0,
+    good_fruit: int = 100,
+    bad_fruit: int = 0,
     tasks: Optional[list[dict[str, Any]]] = None,
     nodes: Optional[list[dict[str, Any]]] = None,
+    events: Optional[list[dict[str, Any]]] = None,
 ) -> GameState:
     map_config = _map_config()
     return GameState.from_start(
@@ -37,7 +40,8 @@ def _state(
                     "teamId": "RED",
                     "state": "IDLE",
                     "currentNodeId": node_id,
-                    "goodFruit": 100,
+                    "goodFruit": good_fruit,
+                    "badFruit": bad_fruit,
                     "freshness": 90,
                     "taskScore": task_score,
                     "resources": {},
@@ -57,7 +61,8 @@ def _state(
                     "teamId": "RED",
                     "state": "IDLE",
                     "currentNodeId": node_id,
-                    "goodFruit": 100,
+                    "goodFruit": good_fruit,
+                    "badFruit": bad_fruit,
                     "freshness": 90,
                     "taskScore": task_score,
                     "resources": {},
@@ -65,7 +70,7 @@ def _state(
             ],
             "nodes": nodes or [],
             "tasks": tasks or [],
-            "events": [],
+            "events": events or [],
             "contests": [],
             "actionResults": [],
         },
@@ -186,6 +191,97 @@ class TaskPlanningTests(unittest.TestCase):
 
         self.assertEqual(
             [{"action": "CLAIM_TASK", "taskId": "task-t04"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_delivery_breaks_enemy_guard_when_one_action_can_clear_it(self) -> None:
+        state = _state(
+            "S10",
+            nodes=[
+                {
+                    "nodeId": "S11",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 2, "active": True},
+                }
+            ],
+        )
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "BREAK_GUARD", "targetNodeId": "S11", "goodFruit": 2, "badFruit": 0}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_delivery_forces_pass_when_enemy_guard_is_too_strong_to_break_once(self) -> None:
+        state = _state(
+            "S10",
+            nodes=[
+                {
+                    "nodeId": "S11",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 4, "active": True},
+                }
+            ],
+        )
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "FORCED_PASS", "targetNodeId": "S11"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_delivery_forces_pass_for_guarded_obstacle(self) -> None:
+        state = _state(
+            "S10",
+            nodes=[
+                {
+                    "nodeId": "S11",
+                    "hasObstacle": True,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 2, "active": True},
+                }
+            ],
+        )
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "FORCED_PASS", "targetNodeId": "S11"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_delivery_recovers_from_hidden_move_blocked_by_guard(self) -> None:
+        state = _state(
+            "S10",
+            events=[
+                {
+                    "type": "ACTION_REJECTED",
+                    "payload": {
+                        "playerId": 1001,
+                        "action": "MOVE",
+                        "targetNodeId": "S11",
+                        "errorCode": "MOVE_BLOCKED_BY_GUARD",
+                    },
+                }
+            ],
+        )
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "FORCED_PASS", "targetNodeId": "S11"}],
             strategy.decide(StrategyContext.from_state(state)),
         )
 
