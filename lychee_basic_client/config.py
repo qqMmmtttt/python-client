@@ -9,6 +9,8 @@ class Config:
     player_id: int
     player_name: str
     version: str
+    log_dir: str = "logs"
+    log_level: str = "INFO"
 
 
 def parse_args() -> Config:
@@ -18,6 +20,12 @@ def parse_args() -> Config:
     parser.add_argument("--player-id", type=int, default=1006)
     parser.add_argument("--player-name", default="BasicPy")
     parser.add_argument("--version", default="0.1")
+    parser.add_argument("--log-dir", default="logs")
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+    )
     args = parser.parse_args()
     return Config(
         host=args.host,
@@ -25,4 +33,6 @@ def parse_args() -> Config:
         player_id=args.player_id,
         player_name=args.player_name,
         version=args.version,
+        log_dir=args.log_dir,
+        log_level=args.log_level,
     )
