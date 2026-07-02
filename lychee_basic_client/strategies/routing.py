@@ -4,7 +4,10 @@ from typing import Optional
 from lychee_basic_client.config import Config
 from lychee_basic_client.models.map import Edge, GameMap
 from lychee_basic_client.models.state import GameState
-from lychee_basic_client.planning.route_profiles import FIRST_ROUND_SAFE_ROUTE
+from lychee_basic_client.planning.route_profiles import (
+    FIRST_ROUND_WATER_EDGE_DISTANCES,
+    FIRST_ROUND_WATER_ROUTE,
+)
 from lychee_basic_client.rules.blocking import enemy_guard_at, obstacle_residue_tax_round
 
 
@@ -25,19 +28,17 @@ class RoutePolicy:
     def _profile_next_hop(
         self, game_map: GameMap, current: str, target: str
     ) -> Optional[str]:
-        if self._profile_name != "first-round-safe":
+        if self._profile_name == "generic":
             return None
-        if not _route_profile_available(game_map, FIRST_ROUND_SAFE_ROUTE):
-            return None
-        if current not in FIRST_ROUND_SAFE_ROUTE or target not in FIRST_ROUND_SAFE_ROUTE:
-            return None
-        current_index = FIRST_ROUND_SAFE_ROUTE.index(current)
-        target_index = FIRST_ROUND_SAFE_ROUTE.index(target)
-        if current_index >= target_index:
-            return None
-        candidate = FIRST_ROUND_SAFE_ROUTE[current_index + 1]
-        if candidate in game_map.neighbors(current):
-            return candidate
+        if self._profile_name == "auto":
+            if not _route_signature_matches(
+                game_map,
+                FIRST_ROUND_WATER_EDGE_DISTANCES,
+            ):
+                return None
+            return _profile_hop(game_map, FIRST_ROUND_WATER_ROUTE, current, target)
+        if self._profile_name in {"first-round-safe", "first-round-water"}:
+            return _profile_hop(game_map, FIRST_ROUND_WATER_ROUTE, current, target)
         return None
 
     def _dynamic_path(self, state: GameState, start: str, target: str) -> list[str]:
@@ -61,6 +62,38 @@ class RoutePolicy:
                 best_cost[neighbor] = next_cost
                 heapq.heappush(queue, (next_cost, neighbor, path + [neighbor]))
         return []
+
+
+def _profile_hop(
+    game_map: GameMap, route: list[str], current: str, target: str
+) -> Optional[str]:
+    if not _route_profile_available(game_map, route):
+        return None
+    if current not in route or target not in route:
+        return None
+    current_index = route.index(current)
+    target_index = route.index(target)
+    if current_index >= target_index:
+        return None
+    candidate = route[current_index + 1]
+    if candidate in game_map.neighbors(current):
+        return candidate
+    return None
+
+
+def _route_signature_matches(game_map: GameMap, distances: dict[tuple[str, str], int]) -> bool:
+    for (left, right), distance in distances.items():
+        edge = _edge_between(game_map, left, right)
+        if edge is None or edge.distance != distance:
+            return False
+    return True
+
+
+def _edge_between(game_map: GameMap, left: str, right: str) -> Optional[Edge]:
+    for edge, neighbor in game_map.iter_neighbor_edges(left):
+        if neighbor == right:
+            return edge
+    return None
 
 
 def _route_profile_available(game_map: GameMap, route: list[str]) -> bool:

@@ -154,10 +154,6 @@ class DeliveryStrategy:
                 return forced_pass(target_node_id)
             return None
 
-        guard = enemy_guard_at(node, player)
-        if guard is not None:
-            return self._enemy_guard_action(state, target_node_id, guard.defense, node.has_obstacle)
-
         if node.has_obstacle:
             t04 = find_t04_for_obstacle(state, target_node_id, self._rejected_task_ids)
             if t04 is not None and _has_delivery_slack(state, target_node_id, margin=80):
@@ -166,6 +162,10 @@ class DeliveryStrategy:
                 return clear(target_node_id)
             return forced_pass(target_node_id)
 
+        guard = enemy_guard_at(node, player)
+        if guard is not None:
+            return self._enemy_guard_action(state, target_node_id, guard.defense)
+
         return None
 
     def _enemy_guard_action(
@@ -173,12 +173,10 @@ class DeliveryStrategy:
         state: GameState,
         target_node_id: str,
         defense: int,
-        has_obstacle: bool,
     ) -> dict[str, Any]:
         payment = _break_guard_payment(state, defense)
         if (
             payment is not None
-            and not has_obstacle
             and _has_delivery_slack(state, target_node_id, margin=18)
         ):
             return break_guard(target_node_id, **payment)
@@ -274,12 +272,20 @@ def _break_guard_payment(state: GameState, defense: int) -> Optional[dict[str, i
     if player is None or defense <= 0:
         return None
 
-    bad_fruit = min(2, player.bad_fruit, defense)
-    remaining = defense - bad_fruit
+    max_bad = min(2, player.bad_fruit)
     max_good = min(2, max(0, player.good_fruit - 1))
-    good_fruit = min(max_good, remaining)
-    if bad_fruit + good_fruit < defense:
+    best: Optional[tuple[int, int, int]] = None
+    for bad_fruit in range(max_bad + 1):
+        for good_fruit in range(max_good + 1):
+            attack = bad_fruit * 3 + good_fruit * 2
+            if attack < defense:
+                continue
+            candidate = (good_fruit, bad_fruit + good_fruit, bad_fruit)
+            if best is None or candidate < best:
+                best = candidate
+    if best is None:
         return None
+    good_fruit, _, bad_fruit = best
     return {"good_fruit": good_fruit, "bad_fruit": bad_fruit}
 
 

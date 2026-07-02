@@ -44,8 +44,9 @@ lychee_basic_client/
 
 路线策略通过 `--route-profile` 控制：
 
-- `auto`：默认值。保留必要 S02 前段交接，之后按当前地图、天气、处理耗时和阻挡做动态图搜索。
-- `first-round-safe`：强制使用第一轮保守路线，只要该路线在当前地图上连通。
+- `auto`：默认值。识别到当前第一轮地图时锚定水路主线；未知/决赛地图回到当前地图、天气、处理耗时和阻挡的动态图搜索。
+- `first-round-water`：显式强制使用第一轮水路主线，只要该路线在当前地图上连通。
+- `first-round-safe`：兼容旧参数名，当前等价于 `first-round-water`。
 - `generic`：不使用任何固定路线，完全按当前地图、天气和阻挡做动态图搜索。
 
 策略层通过 `StrategyContext` 获取当前局面和事件摘要，天气影响由 `WeatherState` 统一解析，路线决策由 `RoutePolicy` 统一处理，避免任务、资源、交付和对抗策略互相耦合。

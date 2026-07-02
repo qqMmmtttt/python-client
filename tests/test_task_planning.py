@@ -212,11 +212,11 @@ class TaskPlanningTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "BREAK_GUARD", "targetNodeId": "S11", "goodFruit": 2, "badFruit": 0}],
+            [{"action": "BREAK_GUARD", "targetNodeId": "S11", "goodFruit": 1, "badFruit": 0}],
             strategy.decide(StrategyContext.from_state(state)),
         )
 
-    def test_delivery_forces_pass_when_enemy_guard_is_too_strong_to_break_once(self) -> None:
+    def test_delivery_breaks_enemy_guard_with_correct_attack_value(self) -> None:
         state = _state(
             "S10",
             nodes=[
@@ -234,11 +234,33 @@ class TaskPlanningTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
+            [{"action": "BREAK_GUARD", "targetNodeId": "S11", "goodFruit": 2, "badFruit": 0}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_delivery_forces_pass_when_enemy_guard_is_too_strong_to_break_once(self) -> None:
+        state = _state(
+            "S10",
+            nodes=[
+                {
+                    "nodeId": "S11",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 7, "active": True},
+                }
+            ],
+        )
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
             [{"action": "FORCED_PASS", "targetNodeId": "S11"}],
             strategy.decide(StrategyContext.from_state(state)),
         )
 
-    def test_delivery_forces_pass_for_guarded_obstacle(self) -> None:
+    def test_delivery_clears_guarded_obstacle_before_breaking_guard(self) -> None:
         state = _state(
             "S10",
             nodes=[
@@ -256,7 +278,7 @@ class TaskPlanningTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "FORCED_PASS", "targetNodeId": "S11"}],
+            [{"action": "CLEAR", "targetNodeId": "S11"}],
             strategy.decide(StrategyContext.from_state(state)),
         )
 

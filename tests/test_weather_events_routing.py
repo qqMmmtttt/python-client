@@ -74,19 +74,19 @@ class WeatherEventsRoutingTests(unittest.TestCase):
 
         self.assertEqual("S04", policy.next_hop(state, "S02", "S14"))
 
-    def test_first_round_safe_profile_keeps_land_route(self) -> None:
+    def test_first_round_safe_profile_uses_water_route(self) -> None:
         state = _real_map_state("S02")
         policy = RoutePolicy(
             Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="first-round-safe")
         )
 
-        self.assertEqual("S03", policy.next_hop(state, "S02", "S14"))
+        self.assertEqual("S04", policy.next_hop(state, "S02", "S14"))
 
-    def test_heavy_rain_pushes_auto_route_back_to_land(self) -> None:
+    def test_auto_route_keeps_first_round_water_anchor_in_heavy_rain(self) -> None:
         state = _real_map_state("S02", weather={"active": [{"type": "HEAVY_RAIN"}]})
         policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="auto"))
 
-        self.assertEqual("S03", policy.next_hop(state, "S02", "S14"))
+        self.assertEqual("S04", policy.next_hop(state, "S02", "S14"))
 
     def test_route_policy_accounts_for_enemy_obstacle_residue_tax(self) -> None:
         state = _final_like_state(

@@ -106,15 +106,16 @@ action(actions=[...])
 
 | 文件 | 作用 |
 |---|---|
-| `planning/route_profiles.py` | 第一轮地图保守主路线，用于显式 `first-round-safe` 兜底。 |
+| `planning/route_profiles.py` | 第一轮地图水路主路线和地图签名，用于当前固定地图的路线锚定。 |
 | `strategies/routing.py` | `RoutePolicy`，按 `--route-profile` 决定使用固定路线还是动态图搜索。 |
 | `planning/estimates.py` | 估算路线耗时、交付剩余耗时，纳入天气路线倍率和固定处理时间。 |
 | `planning/tasks.py` | 皇榜任务可用性、站位点、任务优先级、任务安全时间窗。 |
 
 路线 profile：
 
-- `auto`：默认值。交付策略先保证 S02 前段交接，之后按当前地图、天气、处理耗时、障碍和设卡做动态图搜索；当前地图在无暴雨时会优先进入 S04/S05 水路。
-- `first-round-safe`：强制使用第一轮保守陆路路线。
+- `auto`：默认值。交付策略先保证 S02 前段交接；识别到当前第一轮地图签名时锚定 S04/S05 水路主线，未知/决赛地图回到动态图搜索。
+- `first-round-water`：强制使用第一轮水路主线。
+- `first-round-safe`：兼容旧参数名，当前等价于 `first-round-water`。
 - `generic`：完全按当前地图动态图搜索，便于决赛地图变化；不额外启用第一轮固定路线。
 
 ## 7. 规则层
