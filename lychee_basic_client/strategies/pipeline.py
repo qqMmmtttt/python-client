@@ -18,9 +18,7 @@ class StrategyPipeline:
 
     def decide(self, state: GameState) -> list[dict[str, Any]]:
         context = StrategyContext.from_state(state)
-        chosen_actions: list[dict[str, Any]] = []
-        selected_strategies: list[str] = []
-        used_categories: set[str] = set()
+        chosen_actions: list[ChosenAction] = []
         for strategy in self._strategies:
             strategy_name = strategy.__class__.__name__
             actions = strategy.decide(context)
@@ -30,30 +28,57 @@ class StrategyPipeline:
                 strategy_name,
                 actions,
             )
-            accepted_actions: list[dict[str, Any]] = []
             for action in actions:
                 categories = _action_categories(action)
-                if categories & used_categories:
+                priority = _action_priority(action)
+                conflicts = [
+                    chosen
+                    for chosen in chosen_actions
+                    if categories & chosen.categories
+                ]
+                if conflicts and priority <= max(chosen.priority for chosen in conflicts):
                     self._logger.trace(
                         "strategy_skip round=%s strategy=%s action=%s used_categories=%s",
                         state.round_no,
                         strategy_name,
                         action,
-                        sorted(used_categories),
+                        sorted({category for chosen in conflicts for category in chosen.categories}),
                     )
                     continue
-                used_categories.update(categories)
-                chosen_actions.append(action)
-                accepted_actions.append(action)
-            if accepted_actions:
-                selected_strategies.append(strategy_name)
+                if conflicts:
+                    self._logger.trace(
+                        "strategy_replace round=%s strategy=%s action=%s replaced=%s",
+                        state.round_no,
+                        strategy_name,
+                        action,
+                        [chosen.action for chosen in conflicts],
+                    )
+                chosen_actions = [
+                    chosen
+                    for chosen in chosen_actions
+                    if not (categories & chosen.categories)
+                ]
+                chosen_actions.append(
+                    ChosenAction(
+                        action=action,
+                        categories=categories,
+                        priority=priority,
+                        strategy_name=strategy_name,
+                    )
+                )
 
         if chosen_actions:
-            ordered_actions = sorted(chosen_actions, key=_action_order)
+            ordered = sorted(chosen_actions, key=lambda chosen: _action_order(chosen.action))
+            ordered_actions = [chosen.action for chosen in ordered]
+            used_categories = {
+                category
+                for chosen in chosen_actions
+                for category in chosen.categories
+            }
             self._logger.important(
                 "decision round=%s strategy=%s categories=%s actions=%s",
                 state.round_no,
-                "+".join(selected_strategies),
+                "+".join(chosen.strategy_name for chosen in ordered),
                 sorted(used_categories),
                 ordered_actions,
             )
@@ -65,9 +90,29 @@ class StrategyPipeline:
         return []
 
 
+class ChosenAction:
+    def __init__(
+        self,
+        action: dict[str, Any],
+        categories: set[str],
+        priority: int,
+        strategy_name: str,
+    ) -> None:
+        self.action = action
+        self.categories = categories
+        self.priority = priority
+        self.strategy_name = strategy_name
+
+
 SQUAD_ACTIONS = {"SQUAD_SCOUT", "SQUAD_CLEAR", "SQUAD_REINFORCE", "SQUAD_WEAKEN"}
 WINDOW_ACTIONS = {"WINDOW_CARD"}
 RUSH_ACTIONS = {"RUSH_SPEED", "RUSH_PROTECT"}
+RESOURCE_PRIORITY = {
+    "ICE_BOX": 96,
+    "FAST_HORSE": 95,
+    "SHORT_HORSE": 94,
+    "INTEL": 30,
+}
 
 
 def _action_categories(action: dict[str, Any]) -> set[str]:
@@ -95,3 +140,32 @@ def _action_order(action: dict[str, Any]) -> int:
     if "window" in categories:
         return 2
     return 3
+
+
+def _action_priority(action: dict[str, Any]) -> int:
+    action_type = str(action.get("action") or "")
+    if action_type == "DELIVER":
+        return 130
+    if action_type == "VERIFY_GATE":
+        return 120
+    if action_type in {"FORCED_PASS", "CLEAR", "BREAK_GUARD"}:
+        return 115
+    if action_type == "PROCESS":
+        return 105
+    if action_type == "CLAIM_TASK":
+        return 100
+    if action_type == "MOVE":
+        return 90
+    if action_type == "RUSH_SPEED":
+        return 88
+    if action_type == "RUSH_PROTECT":
+        return 86
+    if action_type == "USE_RESOURCE":
+        return RESOURCE_PRIORITY.get(str(action.get("resourceType") or ""), 40)
+    if action_type == "CLAIM_RESOURCE":
+        return 25
+    if action_type in SQUAD_ACTIONS:
+        return 70
+    if action_type in WINDOW_ACTIONS:
+        return 70
+    return 50

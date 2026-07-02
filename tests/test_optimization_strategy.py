@@ -3,7 +3,9 @@ import unittest
 from pathlib import Path
 from typing import Any, Optional
 
+from lychee_basic_client.config import Config
 from lychee_basic_client.models.state import GameState
+from lychee_basic_client.strategies.factory import build_strategy
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.resources import ResourceStrategy
 from lychee_basic_client.strategies.squad import SquadStrategy
@@ -137,6 +139,43 @@ class OptimizationStrategyTests(unittest.TestCase):
         self.assertEqual(
             [{"action": "SQUAD_WEAKEN", "targetNodeId": "S10"}],
             strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_pipeline_does_not_let_intel_preempt_delivery_move(self) -> None:
+        state = _state(
+            "S09",
+            round_no=250,
+            resources={"INTEL": 1},
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S08", "hasObstacle": True, "obstacleType": "FLOOD", "resourceStock": {}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S10"}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_does_not_let_intel_preempt_next_hop_clear(self) -> None:
+        state = _state(
+            "S09",
+            round_no=250,
+            resources={"INTEL": 1},
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S10", "hasObstacle": True, "obstacleType": "FLOOD", "resourceStock": {}},
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "CLEAR", "targetNodeId": "S10"}],
+            strategy.decide(state),
         )
 
 

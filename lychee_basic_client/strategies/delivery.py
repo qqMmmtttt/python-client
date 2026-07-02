@@ -112,7 +112,7 @@ class DeliveryStrategy:
     def _decide_while_moving(
         self, state: GameState, player: Any
     ) -> list[dict[str, Any]]:
-        if player.next_node_id and player.state == "MOVING":
+        if player.next_node_id:
             return [move(player.next_node_id)]
 
         if player.current_node_id:

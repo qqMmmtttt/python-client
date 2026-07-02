@@ -39,6 +39,22 @@ class SquadStrategyStub:
         return [{"action": "SQUAD_SCOUT", "targetNodeId": "S04"}]
 
 
+class IntelStrategy:
+    def on_start(self, state: GameState) -> None:
+        return None
+
+    def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
+        return [{"action": "USE_RESOURCE", "resourceType": "INTEL", "targetNodeId": "S11"}]
+
+
+class ClearStrategy:
+    def on_start(self, state: GameState) -> None:
+        return None
+
+    def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
+        return [{"action": "CLEAR", "targetNodeId": "S10"}]
+
+
 class StrategyPipelineTests(unittest.TestCase):
     def test_pipeline_uses_first_main_action(self) -> None:
         state = GameState.from_start(sample_start(), 1006)
@@ -58,6 +74,15 @@ class StrategyPipelineTests(unittest.TestCase):
                 {"action": "MOVE", "targetNodeId": "S02"},
                 {"action": "SQUAD_SCOUT", "targetNodeId": "S04"},
             ],
+            pipeline.decide(state),
+        )
+
+    def test_pipeline_replaces_lower_priority_main_action(self) -> None:
+        state = GameState.from_start(sample_start(), 1006)
+        pipeline = StrategyPipeline([IntelStrategy(), ClearStrategy()])
+
+        self.assertEqual(
+            [{"action": "CLEAR", "targetNodeId": "S10"}],
             pipeline.decide(state),
         )
 
