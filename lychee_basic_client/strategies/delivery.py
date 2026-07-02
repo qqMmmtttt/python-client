@@ -1,38 +1,29 @@
 from typing import Any, Optional
 
 from lychee_basic_client.models.state import GameState
+from lychee_basic_client.planning.tasks import find_t04_for_obstacle, select_task_target
 from lychee_basic_client.protocol.actions import (
     break_guard,
     clear,
     deliver,
     dock,
     forced_pass,
+    claim_task,
     move,
     process,
     verify_gate,
 )
+from lychee_basic_client.strategies.context import StrategyContext
+from lychee_basic_client.strategies.routing import RoutePolicy
 
 BUSY_STATES = {"MOVING", "PROCESSING", "CONTESTING", "RESTING", "FORCED_PASSING", "VERIFYING"}
-
-PREFERRED_ROUTE = [
-    "S01",
-    "S02",
-    "S03",
-    "S07",
-    "S09",
-    "S10",
-    "S11",
-    "S12",
-    "S13",
-    "S14",
-    "S15",
-]
 
 
 class DeliveryStrategy:
     """End-to-end S14 verification and S15 delivery decisions."""
 
-    def __init__(self) -> None:
+    def __init__(self, route_policy: RoutePolicy) -> None:
+        self._route_policy = route_policy
         self._completed_process_nodes: set[str] = set()
         self._pending_process_node: Optional[str] = None
 
@@ -41,8 +32,9 @@ class DeliveryStrategy:
         self._pending_process_node = None
         return None
 
-    def decide(self, state: GameState) -> list[dict[str, Any]]:
-        self._observe_process_completion(state)
+    def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
+        state = context.state
+        self._observe_process_completion(context)
 
         player = state.me
         if player is None or player.delivered:
@@ -70,8 +62,13 @@ class DeliveryStrategy:
         if process_action:
             return [process_action]
 
-        target = gate if not player.verified else terminal
-        next_node = self._next_hop(state, current, target)
+        task_target = select_task_target(state, current)
+        if task_target is not None and task_target.stand_node_id == current:
+            return [claim_task(task_target.task_id)]
+        target = task_target.stand_node_id if task_target is not None else gate
+        if player.verified:
+            target = terminal
+        next_node = self._route_policy.next_hop(state, current, target)
         if next_node is None:
             return []
 
@@ -96,16 +93,6 @@ class DeliveryStrategy:
             return dock(current)
         return process(current)
 
-    def _next_hop(self, state: GameState, current: str, target: str) -> Optional[str]:
-        preferred = _preferred_next_hop(current, target, state.game_map.nodes.keys())
-        if preferred and preferred in state.game_map.neighbors(current):
-            return preferred
-
-        path = state.game_map.fastest_path(current, target)
-        if len(path) >= 2:
-            return path[1]
-        return None
-
     def _blocking_action_if_needed(
         self, state: GameState, target_node_id: str
     ) -> Optional[dict[str, Any]]:
@@ -116,6 +103,10 @@ class DeliveryStrategy:
         if node is None:
             return None
 
+        if node.has_obstacle:
+            t04 = find_t04_for_obstacle(state, target_node_id)
+            if t04 is not None:
+                return claim_task(t04["taskId"])
         if node.has_obstacle and player.good_fruit > 0:
             return clear(target_node_id)
 
@@ -132,41 +123,19 @@ class DeliveryStrategy:
             return forced_pass(target_node_id)
         return None
 
-    def _observe_process_completion(self, state: GameState) -> None:
+    def _observe_process_completion(self, context: StrategyContext) -> None:
+        state = context.state
         player = state.me
         if player is None:
             return
 
-        for event in state.events:
-            if event.get("type") != "PROCESS_COMPLETE":
-                continue
-            payload = event.get("payload") or {}
-            if payload.get("playerId") != state.player_id:
-                continue
-            node_id = payload.get("nodeId") or payload.get("targetNodeId") or self._pending_process_node
-            if node_id:
-                self._completed_process_nodes.add(node_id)
-                if self._pending_process_node == node_id:
-                    self._pending_process_node = None
+        for node_id in context.events.completed_process_nodes:
+            self._completed_process_nodes.add(node_id)
+            if self._pending_process_node == node_id:
+                self._pending_process_node = None
 
-        if (
-            self._pending_process_node
-            and player.state == "IDLE"
-            and not player.current_process
-            and player.current_node_id == self._pending_process_node
-        ):
-            self._completed_process_nodes.add(self._pending_process_node)
-            self._pending_process_node = None
-
-
-def _preferred_next_hop(current: str, target: str, available_nodes: Any) -> Optional[str]:
-    available = set(available_nodes)
-    if not all(node in available for node in PREFERRED_ROUTE):
-        return None
-    if current not in PREFERRED_ROUTE or target not in PREFERRED_ROUTE:
-        return None
-    current_index = PREFERRED_ROUTE.index(current)
-    target_index = PREFERRED_ROUTE.index(target)
-    if current_index >= target_index:
-        return None
-    return PREFERRED_ROUTE[current_index + 1]
+        for rejected in context.events.rejected_actions:
+            if rejected.action in {"PROCESS", "DOCK"} and self._pending_process_node:
+                self._pending_process_node = None
+            if rejected.error_code == "PROCESS_REQUIRED" and player.current_node_id:
+                self._completed_process_nodes.discard(player.current_node_id)

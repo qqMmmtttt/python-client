@@ -62,10 +62,14 @@ class ClientSession:
         self._state = GameState.from_start(data, self._config.player_id)
         self._strategy.on_start(self._state)
         self._logger.important(
-            "start match=%s round=%s player_id=%s",
+            "start match=%s round=%s player_id=%s nodes=%s edges=%s process_nodes=%s tasks=%s",
             self._state.match_id,
             self._state.round_no,
             self._config.player_id,
+            len(self._state.game_map.nodes),
+            len(self._state.game_map.edges),
+            sorted(self._state.game_map.process_nodes.keys()),
+            _summarize_task_templates(data.get("taskTemplates") or []),
         )
         write_frame(
             self._sock,
@@ -80,6 +84,25 @@ class ClientSession:
         self._state = GameState.from_inquire(data, self._config.player_id, self._state.game_map)
         actions = self._strategy.decide(self._state)
         player = self._state.me
+        self._logger.important(
+            "round=%s phase=%s player_state=%s node=%s next=%s score=%s task_score=%s "
+            "good=%s bad=%s fresh=%s weather=%s tasks=%s events=%s action_results=%s actions=%s",
+            self._state.round_no,
+            self._state.phase,
+            player.state if player else None,
+            player.current_node_id if player else None,
+            player.next_node_id if player else None,
+            player.total_score if player else None,
+            player.task_score if player else None,
+            player.good_fruit if player else None,
+            player.bad_fruit if player else None,
+            player.freshness if player else None,
+            _summarize_weather(self._state.weather.raw),
+            _summarize_tasks(self._state.tasks),
+            _summarize_events(self._state.events),
+            _summarize_action_results(self._state.action_results),
+            actions,
+        )
         self._logger.info(
             "round=%s phase=%s state=%s node=%s actions=%s",
             self._state.round_no,
@@ -98,3 +121,93 @@ class ClientSession:
             ),
         )
 
+
+def _summarize_task_templates(task_templates: list[dict[str, Any]]) -> list[str]:
+    return [
+        f"{task.get('taskTemplateId')}:{task.get('score')}:{task.get('processRound')}"
+        for task in task_templates
+    ]
+
+
+def _summarize_tasks(tasks: list[dict[str, Any]]) -> list[str]:
+    summary = []
+    for task in tasks:
+        if task.get("completed") or task.get("failed") or not task.get("active", True):
+            continue
+        summary.append(
+            "%s/%s@%s score=%s owner=%s protect=%s expire=%s"
+            % (
+                task.get("taskId"),
+                task.get("taskTemplateId"),
+                task.get("nodeId"),
+                task.get("score"),
+                task.get("ownerPlayerId"),
+                task.get("protectionPlayerId"),
+                task.get("expireRound"),
+            )
+        )
+    return summary
+
+
+def _summarize_weather(weather: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "active": weather.get("active") or weather.get("current") or [],
+        "forecast": weather.get("forecast") or weather.get("upcoming") or [],
+    }
+
+
+def _summarize_events(events: list[dict[str, Any]]) -> list[str]:
+    summary = []
+    important_types = {
+        "TASK_REFRESH",
+        "TASK_COMPLETE",
+        "TASK_EXPIRE",
+        "TASK_TARGET_LOST",
+        "PROCESS_COMPLETE",
+        "ACTION_REJECTED",
+        "INVALID_ACTION",
+        "WINDOW_CONTEST_START",
+        "WINDOW_CONTEST_END",
+        "WINDOW_CONTEST_DRAW",
+        "RESOURCE_CLAIM",
+        "RESOURCE_USE",
+        "OBSTACLE_CLEAR",
+        "GUARD_BREAK",
+        "FORCED_PASS_START",
+        "FORCED_PASS_END",
+        "RUSH_START",
+        "VERIFY_GATE_COMPLETE",
+        "DELIVER_SUCCESS",
+    }
+    for event in events:
+        event_type = event.get("type")
+        if event_type not in important_types:
+            continue
+        payload = event.get("payload") or {}
+        summary.append(
+            "%s player=%s node=%s target=%s task=%s error=%s score=%s"
+            % (
+                event_type,
+                payload.get("playerId"),
+                payload.get("nodeId"),
+                payload.get("targetNodeId"),
+                payload.get("taskId"),
+                payload.get("errorCode"),
+                payload.get("score") or payload.get("scoreDelta"),
+            )
+        )
+    return summary
+
+
+def _summarize_action_results(action_results: list[dict[str, Any]]) -> list[str]:
+    return [
+        "%s player=%s accepted=%s result=%s error=%s"
+        % (
+            result.get("action"),
+            result.get("playerId"),
+            result.get("accepted"),
+            result.get("result"),
+            result.get("errorCode"),
+        )
+        for result in action_results
+    ]

@@ -4,16 +4,17 @@ from .combat import CombatStrategy
 from .delivery import DeliveryStrategy
 from .pipeline import StrategyPipeline
 from .resources import ResourceStrategy
+from .routing import RoutePolicy
 from .tasks import TaskStrategy
 
 
 def build_strategy(config: Config) -> StrategyPipeline:
+    route_policy = RoutePolicy(config)
     return StrategyPipeline(
         [
             CombatStrategy(),
-            ResourceStrategy(),
             TaskStrategy(),
-            DeliveryStrategy(),
+            ResourceStrategy(),
+            DeliveryStrategy(route_policy),
         ]
     )
-

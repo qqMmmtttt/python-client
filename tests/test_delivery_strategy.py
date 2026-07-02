@@ -3,8 +3,11 @@ import unittest
 from pathlib import Path
 from typing import Any, Optional
 
+from lychee_basic_client.config import Config
 from lychee_basic_client.models.state import GameState
+from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.delivery import DeliveryStrategy
+from lychee_basic_client.strategies.routing import RoutePolicy
 
 
 def _state(
@@ -43,19 +46,29 @@ def _state(
 
 
 class DeliveryStrategyTests(unittest.TestCase):
+    def _strategy(self, route_profile: str = "auto") -> DeliveryStrategy:
+        config = Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile=route_profile)
+        return DeliveryStrategy(RoutePolicy(config))
+
     def test_real_map_uses_safe_preferred_first_hop(self) -> None:
-        strategy = DeliveryStrategy()
+        strategy = self._strategy()
         state = _state("S01")
         strategy.on_start(state)
 
-        self.assertEqual([{"action": "MOVE", "targetNodeId": "S02"}], strategy.decide(state))
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S02"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
 
     def test_processes_required_station_once(self) -> None:
-        strategy = DeliveryStrategy()
+        strategy = self._strategy()
         state = _state("S02")
         strategy.on_start(state)
 
-        self.assertEqual([{"action": "PROCESS", "targetNodeId": "S02"}], strategy.decide(state))
+        self.assertEqual(
+            [{"action": "PROCESS", "targetNodeId": "S02"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
 
         completed = _state(
             "S02",
@@ -66,28 +79,34 @@ class DeliveryStrategyTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual([{"action": "MOVE", "targetNodeId": "S03"}], strategy.decide(completed))
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S03"}],
+            strategy.decide(StrategyContext.from_state(completed)),
+        )
 
     def test_waits_for_rush_before_gate_verification(self) -> None:
-        strategy = DeliveryStrategy()
+        strategy = self._strategy()
         state = _state("S14")
         strategy.on_start(state)
 
-        self.assertEqual([], strategy.decide(state))
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
 
     def test_verifies_gate_in_rush_phase(self) -> None:
-        strategy = DeliveryStrategy()
+        strategy = self._strategy()
         state = _state("S14", phase="RUSH")
         strategy.on_start(state)
 
-        self.assertEqual([{"action": "VERIFY_GATE", "targetNodeId": "S14"}], strategy.decide(state))
+        self.assertEqual(
+            [{"action": "VERIFY_GATE", "targetNodeId": "S14"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
 
     def test_delivers_at_terminal_after_verification(self) -> None:
-        strategy = DeliveryStrategy()
+        strategy = self._strategy()
         state = _state("S15", phase="RUSH", verified=True)
         strategy.on_start(state)
 
-        self.assertEqual([{"action": "DELIVER"}], strategy.decide(state))
+        self.assertEqual([{"action": "DELIVER"}], strategy.decide(StrategyContext.from_state(state)))
 
 
 if __name__ == "__main__":

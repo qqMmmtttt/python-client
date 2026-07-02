@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .map import GameMap
+from .weather import WeatherState
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ class GameState:
     tasks: list[dict[str, Any]] = field(default_factory=list)
     resources: list[dict[str, Any]] = field(default_factory=list)
     contests: list[dict[str, Any]] = field(default_factory=list)
+    weather: WeatherState = field(default_factory=WeatherState)
     events: list[dict[str, Any]] = field(default_factory=list)
     action_results: list[dict[str, Any]] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
@@ -95,6 +97,7 @@ class GameState:
             game_map=game_map,
             players=_parse_players(data.get("players") or []),
             nodes=_parse_nodes(data.get("nodes") or []),
+            weather=WeatherState.from_raw(data.get("weather")),
             resources=list(data.get("resources") or []),
             raw=data,
         )
@@ -113,6 +116,7 @@ class GameState:
             nodes=_parse_nodes(data.get("nodes") or []),
             tasks=list(data.get("tasks") or []),
             contests=list(data.get("contests") or []),
+            weather=WeatherState.from_raw(data.get("weather")),
             events=list(data.get("events") or []),
             action_results=list(data.get("actionResults") or []),
             raw=data,

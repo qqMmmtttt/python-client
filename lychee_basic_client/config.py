@@ -11,6 +11,7 @@ class Config:
     version: str
     log_dir: str = "logs"
     log_level: str = "INFO"
+    route_profile: str = "auto"
 
 
 def parse_args() -> Config:
@@ -26,6 +27,12 @@ def parse_args() -> Config:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
     )
+    parser.add_argument(
+        "--route-profile",
+        choices=["auto", "first-round-safe", "generic"],
+        default="auto",
+        help="Route policy profile. Use generic for unknown/final maps.",
+    )
     args = parser.parse_args()
     return Config(
         host=args.host,
@@ -35,4 +42,5 @@ def parse_args() -> Config:
         version=args.version,
         log_dir=args.log_dir,
         log_level=args.log_level,
+        route_profile=args.route_profile,
     )
