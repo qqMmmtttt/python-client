@@ -72,6 +72,11 @@ class DeliveryStrategy:
         if process_action:
             return [process_action]
 
+        mandatory_target = self._mandatory_process_target(state, current)
+        if mandatory_target is not None:
+            next_node = self._route_policy.next_hop(state, current, mandatory_target)
+            return [move(next_node)] if next_node else []
+
         task_target = select_task_target(state, current, self._rejected_task_ids)
         if task_target is not None and task_target.stand_node_id == current:
             return [claim_task(task_target.task_id)]
@@ -163,12 +168,24 @@ class DeliveryStrategy:
         if process_node is not None and process_node.process_type != "VERIFY":
             self._completed_process_nodes.discard(current)
 
+    def _mandatory_process_target(self, state: GameState, current: str) -> Optional[str]:
+        initial_transfer = "S02"
+        if initial_transfer not in state.game_map.process_nodes:
+            return None
+        if initial_transfer in self._completed_process_nodes:
+            return None
+        if current == state.game_map.start_node_id:
+            return initial_transfer
+        return None
+
 
 def _should_bind_break_order_to_verify(state: GameState) -> bool:
     player = state.me
     if player is None:
         return False
     if state.phase != "RUSH" or player.rush_tactic_used_count > 0:
+        return False
+    if not player.break_order_ready:
         return False
     if player.bad_fruit >= 2:
         return True

@@ -4,10 +4,7 @@ from typing import Optional
 from lychee_basic_client.config import Config
 from lychee_basic_client.models.map import Edge, GameMap
 from lychee_basic_client.models.state import GameState
-from lychee_basic_client.planning.route_profiles import (
-    FIRST_ROUND_EDGE_DISTANCES,
-    FIRST_ROUND_SAFE_ROUTE,
-)
+from lychee_basic_client.planning.route_profiles import FIRST_ROUND_SAFE_ROUTE
 
 
 class RoutePolicy:
@@ -27,9 +24,7 @@ class RoutePolicy:
     def _profile_next_hop(
         self, game_map: GameMap, current: str, target: str
     ) -> Optional[str]:
-        if self._profile_name == "generic":
-            return None
-        if self._profile_name == "auto" and not _first_round_signature_matches(game_map):
+        if self._profile_name != "first-round-safe":
             return None
         if not _route_profile_available(game_map, FIRST_ROUND_SAFE_ROUTE):
             return None
@@ -76,25 +71,17 @@ def _route_profile_available(game_map: GameMap, route: list[str]) -> bool:
     return True
 
 
-def _first_round_signature_matches(game_map: GameMap) -> bool:
-    if len(game_map.nodes) != 15 or len(game_map.edges) != 21:
-        return False
-
-    edge_distances = {
-        (edge.from_node_id, edge.to_node_id): edge.distance for edge in game_map.edges
-    }
-    reverse_distances = {
-        (edge.to_node_id, edge.from_node_id): edge.distance for edge in game_map.edges
-    }
-    for key, expected_distance in FIRST_ROUND_EDGE_DISTANCES.items():
-        distance = edge_distances.get(key, reverse_distances.get(key))
-        if distance != expected_distance:
-            return False
-    return True
-
-
 def _edge_cost(state: GameState, edge: Edge, neighbor: str) -> float:
     cost = float(edge.travel_cost) * state.weather.route_multiplier(edge.route_type)
+    process_node = state.game_map.process_node(neighbor)
+    if process_node is not None and process_node.process_type != "VERIFY":
+        process_round = process_node.process_round
+        if state.weather.has_active("HEAVY_RAIN") and process_node.process_type in {
+            "BOARD",
+            "WATER_TRANSFER",
+        }:
+            process_round += 4
+        cost += float(process_round * 1000)
     node = state.nodes.get(neighbor)
     if node is not None and node.has_obstacle:
         cost += 250_000

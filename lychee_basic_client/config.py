@@ -31,7 +31,7 @@ def parse_args() -> Config:
         "--route-profile",
         choices=["auto", "first-round-safe", "generic"],
         default="auto",
-        help="Route policy profile. Use generic for unknown/final maps.",
+        help="Route policy profile. auto uses dynamic routing; first-round-safe keeps the first-round land route.",
     )
     args = parser.parse_args()
     return Config(

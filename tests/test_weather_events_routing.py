@@ -1,4 +1,6 @@
+import json
 import unittest
+from pathlib import Path
 
 from lychee_basic_client.config import Config
 from lychee_basic_client.events.handlers import summarize_events
@@ -66,6 +68,26 @@ class WeatherEventsRoutingTests(unittest.TestCase):
 
         self.assertEqual("B", policy.next_hop(state, "A", "G"))
 
+    def test_auto_route_policy_can_choose_water_route_on_first_map(self) -> None:
+        state = _real_map_state("S02")
+        policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="auto"))
+
+        self.assertEqual("S04", policy.next_hop(state, "S02", "S14"))
+
+    def test_first_round_safe_profile_keeps_land_route(self) -> None:
+        state = _real_map_state("S02")
+        policy = RoutePolicy(
+            Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="first-round-safe")
+        )
+
+        self.assertEqual("S03", policy.next_hop(state, "S02", "S14"))
+
+    def test_heavy_rain_pushes_auto_route_back_to_land(self) -> None:
+        state = _real_map_state("S02", weather={"active": [{"type": "HEAVY_RAIN"}]})
+        policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="auto"))
+
+        self.assertEqual("S03", policy.next_hop(state, "S02", "S14"))
+
 
 def _final_like_state() -> GameState:
     return GameState.from_start(
@@ -86,6 +108,25 @@ def _final_like_state() -> GameState:
             "players": [
                 {"playerId": 1001, "teamId": "RED", "state": "IDLE", "currentNodeId": "A"}
             ],
+        },
+        1001,
+    )
+
+
+def _real_map_state(node_id: str, weather: dict | None = None) -> GameState:
+    map_config = json.loads(Path("example_data/map_config.json").read_text(encoding="utf-8"))
+    return GameState.from_start(
+        {
+            "matchId": "match-real-map",
+            "round": 1,
+            "phase": "NORMAL",
+            "nodes": map_config["nodes"],
+            "edges": map_config["edges"],
+            "processNodes": map_config["processNodes"],
+            "players": [
+                {"playerId": 1001, "teamId": "RED", "state": "IDLE", "currentNodeId": node_id}
+            ],
+            "weather": weather or {},
         },
         1001,
     )

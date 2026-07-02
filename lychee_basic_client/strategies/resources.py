@@ -7,8 +7,10 @@ from lychee_basic_client.rules.buffs import has_move_buff
 from lychee_basic_client.rules.states import NODE_BUSY_STATES, ROUTE_EDGE_STATES
 from lychee_basic_client.strategies.context import StrategyContext
 
-USEFUL_PICKUPS = ("FAST_HORSE", "SHORT_HORSE", "ICE_BOX")
+USEFUL_PICKUPS = ("FAST_HORSE", "SHORT_HORSE", "ICE_BOX", "INTEL")
 HORSE_RESOURCES = ("FAST_HORSE", "SHORT_HORSE")
+INTEL_TARGETS = ("S11", "S13", "S14", "S04", "S05")
+INTEL_RANGE_LIMIT = 15
 
 
 class ResourceStrategy:
@@ -16,9 +18,11 @@ class ResourceStrategy:
 
     def __init__(self) -> None:
         self._attempted_pickups: set[tuple[str, str]] = set()
+        self._used_intel_targets: set[str] = set()
 
     def on_start(self, state: Any) -> None:
         self._attempted_pickups.clear()
+        self._used_intel_targets.clear()
         return None
 
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
@@ -44,6 +48,10 @@ class ResourceStrategy:
             and _delivery_still_safe(state, player.current_node_id, margin=25)
         ):
             return [use_resource("ICE_BOX")]
+
+        intel_action = _intel_action_if_useful(context, player, self._used_intel_targets)
+        if intel_action:
+            return intel_action
 
         horse_action = [] if _is_unprocessed_transfer_node(state) else _horse_action_if_useful(state, player)
         if horse_action:
@@ -82,6 +90,78 @@ def _has_active_t06(state: Any) -> bool:
         if str(task.get("taskTemplateId") or "") != "T06":
             continue
         if task.get("active", True) and not task.get("completed") and not task.get("failed"):
+            return True
+    return False
+
+
+def _intel_action_if_useful(
+    context: StrategyContext,
+    player: Any,
+    used_targets: set[str],
+) -> list[dict[str, Any]]:
+    state = context.state
+    if player.resources.get("INTEL", 0) <= 0 or not player.current_node_id:
+        return []
+    if not _delivery_still_safe(state, player.current_node_id, margin=15):
+        return []
+
+    targets = _intel_targets_for_state(context, player.current_node_id)
+    for target in targets:
+        if target in used_targets:
+            continue
+        if target in state.game_map.terminal_node_ids:
+            continue
+        if target not in state.game_map.nodes:
+            continue
+        if not _within_intel_range(state, player.current_node_id, target):
+            continue
+        if _has_own_scout_marker(state, target):
+            used_targets.add(target)
+            continue
+        used_targets.add(target)
+        return [use_resource("INTEL", target)]
+    return []
+
+
+def _intel_targets_for_state(context: StrategyContext, current_node_id: str) -> list[str]:
+    state = context.state
+    targets: list[str] = []
+    process_node = state.game_map.process_node(current_node_id)
+    if (
+        process_node is not None
+        and process_node.process_type != "VERIFY"
+        and current_node_id not in context.events.completed_process_nodes
+    ):
+        targets.append(current_node_id)
+    targets.extend(INTEL_TARGETS)
+
+    deduped: list[str] = []
+    for target in targets:
+        if target not in deduped:
+            deduped.append(target)
+    return deduped
+
+
+def _within_intel_range(state: Any, current_node_id: str, target_node_id: str) -> bool:
+    current = state.game_map.nodes.get(current_node_id)
+    target = state.game_map.nodes.get(target_node_id)
+    if current is None or target is None:
+        return False
+    current_x = int(current.raw.get("x") or 0)
+    current_y = int(current.raw.get("y") or 0)
+    target_x = int(target.raw.get("x") or 0)
+    target_y = int(target.raw.get("y") or 0)
+    return max(abs(current_x - target_x), abs(current_y - target_y)) <= INTEL_RANGE_LIMIT
+
+
+def _has_own_scout_marker(state: Any, target_node_id: str) -> bool:
+    player = state.me
+    node = state.nodes.get(target_node_id)
+    if player is None or node is None:
+        return False
+    markers = node.raw.get("scouted") or node.raw.get("scouts") or []
+    for marker in markers:
+        if marker.get("playerId") == state.player_id or marker.get("teamId") == player.team_id:
             return True
     return False
 

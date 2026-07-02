@@ -19,6 +19,7 @@ def _state(
     good_fruit: int = 100,
     bad_fruit: int = 0,
     freshness: float = 90,
+    break_order_ready: bool = False,
     events: Optional[list[dict[str, Any]]] = None,
 ) -> GameState:
     map_config = json.loads(Path("example_data/map_config.json").read_text(encoding="utf-8"))
@@ -40,6 +41,7 @@ def _state(
                     "goodFruit": good_fruit,
                     "badFruit": bad_fruit,
                     "freshness": freshness,
+                    "breakOrderReady": break_order_ready,
                 }
             ],
             "events": events or [],
@@ -55,7 +57,7 @@ class DeliveryStrategyTests(unittest.TestCase):
         config = Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile=route_profile)
         return DeliveryStrategy(RoutePolicy(config))
 
-    def test_real_map_uses_safe_preferred_first_hop(self) -> None:
+    def test_real_map_goes_to_initial_transfer_first(self) -> None:
         strategy = self._strategy()
         state = _state("S01")
         strategy.on_start(state)
@@ -65,7 +67,7 @@ class DeliveryStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(state)),
         )
 
-    def test_processes_required_station_once(self) -> None:
+    def test_processes_required_station_once_then_can_enter_water_route(self) -> None:
         strategy = self._strategy()
         state = _state("S02")
         strategy.on_start(state)
@@ -85,7 +87,7 @@ class DeliveryStrategyTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S03"}],
+            [{"action": "MOVE", "targetNodeId": "S04"}],
             strategy.decide(StrategyContext.from_state(completed)),
         )
 
@@ -154,9 +156,19 @@ class DeliveryStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(state)),
         )
 
-    def test_late_gate_verification_binds_break_order_when_affordable(self) -> None:
+    def test_gate_verification_does_not_bind_break_order_before_ready(self) -> None:
         strategy = self._strategy()
         state = _state("S14", round_no=565, phase="RUSH", bad_fruit=2)
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "VERIFY_GATE", "targetNodeId": "S14"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_late_gate_verification_binds_break_order_when_ready_and_affordable(self) -> None:
+        strategy = self._strategy()
+        state = _state("S14", round_no=565, phase="RUSH", bad_fruit=2, break_order_ready=True)
         strategy.on_start(state)
 
         self.assertEqual(

@@ -23,13 +23,41 @@ class MoveStrategy:
         return [{"action": "MOVE", "targetNodeId": "S02"}]
 
 
+class OtherMoveStrategy:
+    def on_start(self, state: GameState) -> None:
+        return None
+
+    def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
+        return [{"action": "MOVE", "targetNodeId": "S14"}]
+
+
+class SquadStrategyStub:
+    def on_start(self, state: GameState) -> None:
+        return None
+
+    def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
+        return [{"action": "SQUAD_SCOUT", "targetNodeId": "S04"}]
+
+
 class StrategyPipelineTests(unittest.TestCase):
-    def test_pipeline_uses_first_non_empty_strategy(self) -> None:
+    def test_pipeline_uses_first_main_action(self) -> None:
         state = GameState.from_start(sample_start(), 1006)
-        pipeline = StrategyPipeline([EmptyStrategy(), MoveStrategy()])
+        pipeline = StrategyPipeline([EmptyStrategy(), MoveStrategy(), OtherMoveStrategy()])
 
         self.assertEqual(
             [{"action": "MOVE", "targetNodeId": "S02"}],
+            pipeline.decide(state),
+        )
+
+    def test_pipeline_combines_main_and_squad_actions(self) -> None:
+        state = GameState.from_start(sample_start(), 1006)
+        pipeline = StrategyPipeline([SquadStrategyStub(), MoveStrategy()])
+
+        self.assertEqual(
+            [
+                {"action": "MOVE", "targetNodeId": "S02"},
+                {"action": "SQUAD_SCOUT", "targetNodeId": "S04"},
+            ],
             pipeline.decide(state),
         )
 

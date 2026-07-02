@@ -38,6 +38,7 @@ class PlayerState:
     bad_fruit: int = 0
     guard_action_point: int = 0
     rush_tactic_used_count: int = 0
+    break_order_ready: bool = False
     squad_available: int = 0
     task_score: int = 0
     total_score: int = 0
@@ -60,6 +61,7 @@ class PlayerState:
             bad_fruit=int(raw.get("badFruit") or 0),
             guard_action_point=int(raw.get("guardActionPoint") or 0),
             rush_tactic_used_count=int(raw.get("rushTacticUsedCount") or 0),
+            break_order_ready=bool(raw.get("breakOrderReady", False)),
             squad_available=int(raw.get("squadAvailable") or 0),
             task_score=int(raw.get("taskScore") or 0),
             total_score=int(raw.get("totalScore") or 0),

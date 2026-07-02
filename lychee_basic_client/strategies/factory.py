@@ -6,6 +6,7 @@ from .pipeline import StrategyPipeline
 from .resources import ResourceStrategy
 from .routing import RoutePolicy
 from .rush import RushStrategy
+from .squad import SquadStrategy
 from .tasks import TaskStrategy
 
 
@@ -14,6 +15,7 @@ def build_strategy(config: Config) -> StrategyPipeline:
     return StrategyPipeline(
         [
             CombatStrategy(),
+            SquadStrategy(),
             TaskStrategy(),
             ResourceStrategy(),
             RushStrategy(),
