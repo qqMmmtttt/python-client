@@ -11,9 +11,10 @@ from lychee_basic_client.protocol.actions import (
     claim_task,
     move,
     process,
+    set_guard,
     verify_gate,
 )
-from lychee_basic_client.rules.states import MAIN_ACTION_BUSY_STATES
+from lychee_basic_client.rules.states import MAIN_ACTION_BUSY_STATES, NODE_BUSY_STATES, ROUTE_EDGE_STATES
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.routing import RoutePolicy
 
@@ -27,12 +28,16 @@ class DeliveryStrategy:
         self._pending_process_node: Optional[str] = None
         self._last_settled_node: Optional[str] = None
         self._rejected_task_ids: set[str] = set()
+        self._object_busy_nodes: set[str] = set()
+        self._object_busy_recover_round: int = 0
 
     def on_start(self, state: GameState) -> None:
         self._completed_process_nodes.clear()
         self._pending_process_node = None
         self._last_settled_node = None
         self._rejected_task_ids.clear()
+        self._object_busy_nodes.clear()
+        self._object_busy_recover_round = 0
         return None
 
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
@@ -42,8 +47,17 @@ class DeliveryStrategy:
         player = state.me
         if player is None or player.delivered:
             return []
-        if player.state in MAIN_ACTION_BUSY_STATES or player.current_process:
+        if player.current_process:
             return []
+        if player.state in NODE_BUSY_STATES:
+            return []
+
+        if player.state in ROUTE_EDGE_STATES:
+            return self._decide_while_moving(state, player)
+
+        if player.state != "IDLE":
+            return []
+
         if not player.current_node_id:
             return []
 
@@ -93,11 +107,32 @@ class DeliveryStrategy:
 
         return [move(next_node)]
 
+    def _decide_while_moving(
+        self, state: GameState, player: Any
+    ) -> list[dict[str, Any]]:
+        if player.next_node_id and player.state == "MOVING":
+            return [move(player.next_node_id)]
+
+        if player.current_node_id:
+            gate = state.game_map.gate_node_id
+            terminal = state.game_map.terminal_node_ids[0]
+            target = terminal if player.verified else gate
+            next_node = self._route_policy.next_hop(state, player.current_node_id, target)
+            if next_node:
+                return [move(next_node)]
+
+        return []
+
     def _process_action_if_needed(
         self, state: GameState, current: str
     ) -> Optional[dict[str, Any]]:
         if current in self._completed_process_nodes:
             return None
+        if current in self._object_busy_nodes:
+            if state.round_no < self._object_busy_recover_round:
+                self._completed_process_nodes.add(current)
+                return None
+            self._object_busy_nodes.discard(current)
         process_node = state.game_map.process_node(current)
         if process_node is None or process_node.process_type == "VERIFY":
             return None
@@ -147,11 +182,15 @@ class DeliveryStrategy:
 
         for node_id in context.events.completed_process_nodes:
             self._completed_process_nodes.add(node_id)
+            self._object_busy_nodes.discard(node_id)
             if self._pending_process_node == node_id:
                 self._pending_process_node = None
 
         for rejected in context.events.rejected_actions:
             if rejected.action in {"PROCESS", "DOCK"} and self._pending_process_node:
+                if rejected.error_code == "OBJECT_BUSY":
+                    self._object_busy_nodes.add(self._pending_process_node)
+                    self._object_busy_recover_round = state.round_no + 6
                 self._pending_process_node = None
             if rejected.error_code == "PROCESS_REQUIRED" and player.current_node_id:
                 self._completed_process_nodes.discard(player.current_node_id)
@@ -173,6 +212,8 @@ class DeliveryStrategy:
         if initial_transfer not in state.game_map.process_nodes:
             return None
         if initial_transfer in self._completed_process_nodes:
+            return None
+        if initial_transfer in self._object_busy_nodes:
             return None
         if current == state.game_map.start_node_id:
             return initial_transfer
