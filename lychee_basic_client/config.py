@@ -24,7 +24,7 @@ def parse_args() -> Config:
     parser.add_argument("--log-dir", default="logs")
     parser.add_argument(
         "--log-level",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        choices=["TRACE", "DEBUG", "INFO", "IMPORTANT", "WARNING", "ERROR"],
         default="INFO",
     )
     parser.add_argument(

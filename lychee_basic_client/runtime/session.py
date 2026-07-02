@@ -6,7 +6,7 @@ from lychee_basic_client.config import Config
 from lychee_basic_client.models.state import GameState
 from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.protocol.actions import action_message
-from lychee_basic_client.protocol.framing import read_frame, write_frame
+from lychee_basic_client.protocol.framing import encode_frame, read_frame_with_meta
 from lychee_basic_client.protocol.messages import ready_message, registration_message
 from lychee_basic_client.strategies.factory import build_strategy
 
@@ -24,7 +24,8 @@ class ClientSession:
 
         while True:
             try:
-                message = read_frame(self._sock)
+                message, prefix, body = read_frame_with_meta(self._sock)
+                self._log_wire("inbound", message, prefix, len(body))
             except EOFError:
                 self._logger.important("connection closed")
                 return 0
@@ -38,7 +39,7 @@ class ClientSession:
 
     def _send_registration(self) -> None:
         self._logger.important("sending registration player_id=%s", self._config.player_id)
-        write_frame(self._sock, registration_message(self._config))
+        self._send_message(registration_message(self._config))
 
     def _handle_message(self, message: dict[str, Any]) -> Optional[int]:
         msg_name = message.get("msg_name")
@@ -53,7 +54,9 @@ class ClientSession:
             return 0
         elif msg_name == "error":
             self._logger.error("error received: %s", json.dumps(message, ensure_ascii=False))
-            return 1
+            if self._state is None:
+                return 1
+            return None
         else:
             self._logger.warning("ignored msg_name=%s", msg_name)
         return None
@@ -71,8 +74,7 @@ class ClientSession:
             sorted(self._state.game_map.process_nodes.keys()),
             _summarize_task_templates(data.get("taskTemplates") or []),
         )
-        write_frame(
-            self._sock,
+        self._send_message(
             ready_message(self._state.match_id, self._state.round_no, self._config.player_id),
         )
 
@@ -111,14 +113,37 @@ class ClientSession:
             player.current_node_id if player else None,
             actions,
         )
-        write_frame(
-            self._sock,
+        self._send_message(
             action_message(
                 self._state.match_id,
                 self._state.round_no,
                 self._config.player_id,
                 actions,
             ),
+        )
+
+    def _send_message(self, message: dict[str, Any]) -> None:
+        frame = encode_frame(message)
+        self._log_wire("outbound", message, frame[:5], len(frame) - 5)
+        self._sock.sendall(frame)
+
+    def _log_wire(
+        self,
+        direction: str,
+        message: dict[str, Any],
+        prefix: bytes,
+        body_length: int,
+    ) -> None:
+        data = message.get("msg_data") or {}
+        self._logger.trace(
+            "wire direction=%s msg_name=%s round=%s player_id=%s prefix=%s body_bytes=%s message=%s",
+            direction,
+            message.get("msg_name"),
+            data.get("round"),
+            data.get("playerId"),
+            prefix.decode("ascii", errors="replace"),
+            body_length,
+            json.dumps(message, ensure_ascii=False, separators=(",", ":")),
         )
 
 

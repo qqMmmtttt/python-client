@@ -18,7 +18,7 @@ def read_exact(sock: socket.socket, length: int) -> bytes:
     return b"".join(chunks)
 
 
-def read_frame(sock: socket.socket) -> dict[str, Any]:
+def read_frame_with_meta(sock: socket.socket) -> tuple[dict[str, Any], bytes, bytes]:
     prefix = read_exact(sock, HEADER_LENGTH)
     try:
         length = int(prefix.decode("ascii"))
@@ -27,12 +27,20 @@ def read_frame(sock: socket.socket) -> dict[str, Any]:
     if length < 0 or length > MAX_BODY:
         raise ValueError(f"invalid frame length: {length}")
     body = read_exact(sock, length)
-    return json.loads(body.decode("utf-8"))
+    return json.loads(body.decode("utf-8")), prefix, body
 
 
-def write_frame(sock: socket.socket, message: dict[str, Any]) -> None:
+def read_frame(sock: socket.socket) -> dict[str, Any]:
+    message, _, _ = read_frame_with_meta(sock)
+    return message
+
+
+def encode_frame(message: dict[str, Any]) -> bytes:
     body = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(body) > MAX_BODY:
         raise ValueError(f"message too large: {len(body)}")
-    sock.sendall(f"{len(body):05d}".encode("ascii") + body)
+    return f"{len(body):05d}".encode("ascii") + body
 
+
+def write_frame(sock: socket.socket, message: dict[str, Any]) -> None:
+    sock.sendall(encode_frame(message))
