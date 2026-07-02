@@ -3,7 +3,7 @@ import unittest
 from lychee_basic_client.messages import heartbeat_action, move_action
 
 
-class MessageTests(unittest.TestCase):
+class MovementStrategyTests(unittest.TestCase):
     def test_heartbeat_action_uses_empty_actions(self) -> None:
         self.assertEqual(
             {
