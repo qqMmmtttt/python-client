@@ -1,5 +1,6 @@
 from typing import Any
 
+from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.planning.tasks import (
     BONUS_TASK_SCORE_GOAL,
     find_claimable_task_here,
@@ -15,6 +16,7 @@ class TaskStrategy:
 
     def __init__(self) -> None:
         self._rejected_task_ids: set[str] = set()
+        self._logger = get_logger("strategies.tasks")
 
     def on_start(self, state: Any) -> None:
         self._rejected_task_ids.clear()
@@ -40,6 +42,14 @@ class TaskStrategy:
         task = find_claimable_task_here(state, self._rejected_task_ids)
         if task is None:
             return []
+        self._logger.important(
+            "task_claim round=%s node=%s task=%s template=%s score=%s | 皇榜任务：主车队在任务目标节点，提交 CLAIM_TASK 处理任务以获取任务分",
+            state.round_no,
+            player.current_node_id,
+            task.get("taskId"),
+            task.get("taskTemplateId"),
+            task.get("score"),
+        )
         return [claim_task(task["taskId"])]
 
     def _observe_rejections(self, context: StrategyContext) -> None:

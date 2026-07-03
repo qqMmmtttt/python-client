@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.planning.estimates import estimate_delivery_rounds
 from lychee_basic_client.planning.tasks import TASK_CUTOFF_ROUND, TASK_SCORE_GOAL
 from lychee_basic_client.protocol.actions import claim_resource, use_resource
@@ -46,6 +47,7 @@ class ResourceStrategy:
     def __init__(self) -> None:
         self._attempted_pickups: set[tuple[str, str]] = set()
         self._used_intel_targets: set[str] = set()
+        self._logger = get_logger("strategies.resources")
 
     def on_start(self, state: Any) -> None:
         self._attempted_pickups.clear()
@@ -76,15 +78,33 @@ class ResourceStrategy:
             and player.current_node_id
             and _delivery_still_safe(state, player.current_node_id, margin=25)
         ):
+            self._logger.important(
+                "use_ice_box round=%s node=%s fresh=%s | 使用冰鉴：鲜度低于阈值，使用冰鉴将鲜度 +10（上限 100）以保鲜货物",
+                state.round_no,
+                player.current_node_id,
+                player.freshness,
+            )
             return [use_resource("ICE_BOX")]
 
         if not _has_active_task_at_current_node(state, player.current_node_id):
             intel_action = _intel_action_if_useful(context, player, self._used_intel_targets)
             if intel_action:
+                self._logger.important(
+                    "use_intel round=%s from=%s target=%s | 使用情报：为目标节点添加己方探路标记，后续该节点处理帧数 -3",
+                    state.round_no,
+                    player.current_node_id,
+                    intel_action[0].get("targetNodeId"),
+                )
                 return intel_action
 
         horse_action = [] if _is_unprocessed_transfer_node(state) else _horse_action_if_useful(state, player)
         if horse_action:
+            self._logger.important(
+                "use_horse round=%s node=%s resource=%s | 使用马类资源：提升基础每帧移动量加速路线移动（快马 1200 / 短程马 1150）",
+                state.round_no,
+                player.current_node_id,
+                horse_action[0].get("resourceType"),
+            )
             return horse_action
 
         if player.current_node_id and state.round_no < 330 and _delivery_still_safe(
@@ -105,6 +125,13 @@ class ResourceStrategy:
                         and _should_claim_resource(state, player, resource_type)
                     ):
                         self._attempted_pickups.add(key)
+                        self._logger.important(
+                            "claim_resource round=%s node=%s resource=%s stock=%s | 领取资源：在资源点提交 CLAIM_RESOURCE 领取资源（2 帧处理）",
+                            state.round_no,
+                            player.current_node_id,
+                            resource_type,
+                            node.resource_stock.get(resource_type, 0),
+                        )
                         return [claim_resource(player.current_node_id, resource_type)]
         return []
 

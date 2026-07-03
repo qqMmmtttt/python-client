@@ -49,7 +49,8 @@ class SquadStrategy:
         if weaken_target and player.squad_available >= 2:
             self._pending_weaken_counts[weaken_target] = self._pending_weaken_counts.get(weaken_target, 0) + 1
             self._logger.important(
-                "squad_weaken_dispatch round=%s target=%s available=%s reserve=%s pending=%s",
+                "squad_weaken_dispatch round=%s target=%s available=%s reserve=%s pending=%s"
+                " | 小分队削弱：派出小分队降低敌方设卡防守值（消耗 2 人手，目标防守值 -2）",
                 state.round_no,
                 weaken_target,
                 player.squad_available,
@@ -61,6 +62,14 @@ class SquadStrategy:
         clear_target = _clear_target_on_route(context, self._dispatched_clear_targets, self._route_policy)
         if clear_target and player.squad_available - SQUAD_WEAKEN_COST >= reserve:
             self._dispatched_clear_targets.add(clear_target)
+            self._logger.important(
+                "squad_clear_dispatch round=%s target=%s available=%s reserve=%s"
+                " | 小分队清障：派出小分队远程清除道路障碍（消耗 2 人手，不算完成 T04）",
+                state.round_no,
+                clear_target,
+                player.squad_available,
+                reserve,
+            )
             return [squad_clear(clear_target)]
 
         if player.squad_available - 1 < reserve:
@@ -84,6 +93,13 @@ class SquadStrategy:
                 self._dispatched_scout_targets.add(target)
                 continue
             self._dispatched_scout_targets.add(target)
+            self._logger.important(
+                "squad_scout_dispatch round=%s target=%s available=%s"
+                " | 小分队探路：派出小分队为目标节点添加己方探路标记（消耗 1 人手，后续该节点处理帧数 -3）",
+                state.round_no,
+                target,
+                player.squad_available,
+            )
             return [squad_scout(target)]
         return []
 

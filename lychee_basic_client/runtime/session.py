@@ -18,6 +18,7 @@ class ClientSession:
         self._strategy = build_strategy(config)
         self._state: Optional[GameState] = None
         self._logger = get_logger("runtime.session")
+        self._last_phase: str = ""
 
     def run(self) -> int:
         self._send_registration()
@@ -27,7 +28,7 @@ class ClientSession:
                 message, prefix, body = read_frame_with_meta(self._sock)
                 self._log_wire("inbound", message, prefix, len(body))
             except EOFError:
-                self._logger.important("connection closed")
+                self._logger.important("connection closed | 连接已关闭，客户端主循环正常退出")
                 return 0
             except Exception:
                 self._logger.exception("failed to read server frame")
@@ -38,7 +39,10 @@ class ClientSession:
                 return result
 
     def _send_registration(self) -> None:
-        self._logger.important("sending registration player_id=%s", self._config.player_id)
+        self._logger.important(
+            "sending registration player_id=%s | 正在向服务器发送注册消息，确认本局参赛身份",
+            self._config.player_id,
+        )
         self._send_message(registration_message(self._config))
 
     def _handle_message(self, message: dict[str, Any]) -> Optional[int]:
@@ -50,7 +54,10 @@ class ClientSession:
         elif msg_name == "inquire":
             self._handle_inquire(data)
         elif msg_name == "over":
-            self._logger.important("over received: %s", json.dumps(data, ensure_ascii=False))
+            self._logger.important(
+                "over received: %s | 收到对局结束消息，本局比赛已结算完毕",
+                json.dumps(data, ensure_ascii=False),
+            )
             return 0
         elif msg_name == "error":
             self._logger.error("error received: %s", json.dumps(message, ensure_ascii=False))
@@ -64,8 +71,10 @@ class ClientSession:
     def _handle_start(self, data: dict[str, Any]) -> None:
         self._state = GameState.from_start(data, self._config.player_id)
         self._strategy.on_start(self._state)
+        self._last_phase = self._state.phase
         self._logger.important(
-            "start match=%s round=%s player_id=%s nodes=%s edges=%s process_nodes=%s tasks=%s",
+            "start match=%s round=%s player_id=%s nodes=%s edges=%s process_nodes=%s tasks=%s"
+            " | 开局初始化完成：地图节点、路线边、固定处理站点和任务模板已载入，准备发送 ready",
             self._state.match_id,
             self._state.round_no,
             self._config.player_id,
@@ -84,11 +93,14 @@ class ClientSession:
             return
 
         self._state = GameState.from_inquire(data, self._config.player_id, self._state.game_map)
+        self._log_phase_transition()
+        self._log_key_events()
         actions = self._strategy.decide(self._state)
         player = self._state.me
         self._logger.important(
             "round=%s phase=%s player_state=%s node=%s next=%s score=%s task_score=%s "
-            "good=%s bad=%s fresh=%s weather=%s tasks=%s events=%s action_results=%s actions=%s",
+            "good=%s bad=%s fresh=%s weather=%s tasks=%s events=%s action_results=%s actions=%s"
+            " | 每帧决策摘要：结算帧、阶段、主车队状态与位置、资产分数、天气、可接任务、关键事件、上帧动作结果与本帧提交动作",
             self._state.round_no,
             self._state.phase,
             player.state if player else None,
@@ -121,6 +133,74 @@ class ClientSession:
                 actions,
             ),
         )
+
+    def _log_phase_transition(self) -> None:
+        if self._state is None:
+            return
+        current_phase = self._state.phase
+        if current_phase != self._last_phase and self._last_phase:
+            if current_phase == "RUSH":
+                self._logger.important(
+                    "phase_transition round=%s from=%s to=%s | 进入宫宴冲刺阶段：S14 宫门验核开放，终局急策可用，小分队停止新派发",
+                    self._state.round_no,
+                    self._last_phase,
+                    current_phase,
+                )
+            else:
+                self._logger.important(
+                    "phase_transition round=%s from=%s to=%s | 比赛阶段切换",
+                    self._state.round_no,
+                    self._last_phase,
+                    current_phase,
+                )
+        self._last_phase = current_phase
+
+    def _log_key_events(self) -> None:
+        if self._state is None:
+            return
+        player_id = self._config.player_id
+        for event in self._state.events:
+            payload = event.get("payload") or {}
+            event_player_id = payload.get("playerId")
+            if event_player_id not in (None, player_id):
+                continue
+            event_type = event.get("type")
+            if event_type == "TASK_COMPLETE":
+                self._logger.important(
+                    "event_task_complete round=%s task=%s template=%s score=%s | 皇榜任务完成：获得任务分，推进任务里程碑",
+                    self._state.round_no,
+                    payload.get("taskId"),
+                    payload.get("taskTemplateId"),
+                    payload.get("score") or payload.get("scoreDelta"),
+                )
+            elif event_type == "VERIFY_GATE_COMPLETE":
+                self._logger.important(
+                    "event_verify_gate_complete round=%s node=%s | 宫门验核完成：已验核状态生效，可前往 S15 兴庆宫交付",
+                    self._state.round_no,
+                    payload.get("nodeId") or "S14",
+                )
+            elif event_type == "DELIVER_SUCCESS":
+                self._logger.important(
+                    "event_deliver_success round=%s node=%s score=%s | 终点交付成功：本局已交付，后续主动动作将按交付后违规扣分",
+                    self._state.round_no,
+                    payload.get("nodeId") or "S15",
+                    payload.get("score") or payload.get("scoreDelta"),
+                )
+            elif event_type == "OBSTACLE_CLEAR":
+                self._logger.important(
+                    "event_obstacle_clear round=%s node=%s | 道路障碍已清除：目标节点恢复普通通行",
+                    self._state.round_no,
+                    payload.get("nodeId") or payload.get("targetNodeId"),
+                )
+            elif event_type in {"ACTION_REJECTED", "INVALID_ACTION"}:
+                self._logger.important(
+                    "event_action_rejected round=%s action=%s error=%s node=%s target=%s | 动作被拒绝：需检查状态或条件是否满足（常见错误：移动中提交非移动类动作）",
+                    self._state.round_no,
+                    payload.get("action"),
+                    payload.get("errorCode"),
+                    payload.get("nodeId"),
+                    payload.get("targetNodeId"),
+                )
 
     def _send_message(self, message: dict[str, Any]) -> None:
         frame = encode_frame(message)

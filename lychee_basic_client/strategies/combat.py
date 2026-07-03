@@ -1,5 +1,6 @@
 from typing import Any
 
+from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.protocol.actions import window_card
 from lychee_basic_client.rules.buffs import has_move_buff
 from lychee_basic_client.strategies.context import StrategyContext
@@ -7,6 +8,9 @@ from lychee_basic_client.strategies.context import StrategyContext
 
 class CombatStrategy:
     """Window, guard, forced-pass, squad, and rush-tactic decisions."""
+
+    def __init__(self) -> None:
+        self._logger = get_logger("strategies.combat")
 
     def on_start(self, state: Any) -> None:
         return None
@@ -20,7 +24,15 @@ class CombatStrategy:
             if contest.get("resolved") or contest.get("status") == "SUPPRESSED":
                 continue
             if _contest_involves_player(contest, state.player_id):
-                return [window_card(contest["contestId"], _choose_card(player.raw, contest))]
+                card = _choose_card(player.raw, contest)
+                self._logger.important(
+                    "window_card round=%s contest=%s type=%s card=%s | 窗口出牌：本队参与窗口争夺，按规则选择本拍窗口牌（3 拍定胜负）",
+                    state.round_no,
+                    contest.get("contestId"),
+                    contest.get("contestType") or contest.get("type"),
+                    card,
+                )
+                return [window_card(contest["contestId"], card)]
         return []
 
 

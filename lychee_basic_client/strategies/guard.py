@@ -1,6 +1,7 @@
 from typing import Any, Optional
 
 from lychee_basic_client.models.state import GameState, NodeState, PlayerState
+from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.planning.estimates import estimate_delivery_rounds, estimate_path_rounds
 from lychee_basic_client.planning.tasks import TASK_SCORE_GOAL
 from lychee_basic_client.protocol.actions import set_guard
@@ -31,6 +32,7 @@ class GuardStrategy:
 
     def __init__(self) -> None:
         self._attempted_nodes: set[str] = set()
+        self._logger = get_logger("strategies.guard")
 
     def on_start(self, state: Any) -> None:
         self._attempted_nodes.clear()
@@ -75,6 +77,13 @@ class GuardStrategy:
             return []
 
         self._attempted_nodes.add(current)
+        self._logger.important(
+            "set_guard round=%s node=%s extra_good=%s candidate_score=%s | 设卡：在关键节点建立己方设卡阻挡敌方通行（4 帧处理，防守值 = 2 + 投入×2）",
+            state.round_no,
+            current,
+            extra_good_fruit,
+            candidate_score,
+        )
         return [set_guard(current, extra_good_fruit=extra_good_fruit)]
 
 

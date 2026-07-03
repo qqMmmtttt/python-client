@@ -364,7 +364,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S07"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(blocked)),
         )
 
@@ -404,7 +404,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S07"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(blocked)),
         )
 
@@ -440,7 +440,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S07"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(blocked)),
         )
 
@@ -495,7 +495,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "WAIT"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
@@ -519,7 +519,7 @@ class TaskPlanningTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S07"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(observed_guard)),
         )
 
@@ -539,11 +539,11 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "WAIT"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
-    def test_delivery_holds_after_one_pivot_until_server_reports_node_or_guard_clear(self) -> None:
+    def test_delivery_holds_on_best_staging_edge_while_squad_is_in_flight(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -570,7 +570,52 @@ class TaskPlanningTests(unittest.TestCase):
         pivot_edge = _state(
             "S09",
             player_state="MOVING",
-            next_node_id="S07",
+            next_node_id="S08",
+            squad_available=0,
+            squad_in_flight=2,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "WAIT"}],
+            strategy.decide(StrategyContext.from_state(pivot_edge)),
+        )
+
+    def test_delivery_continues_to_staging_when_no_squad_can_clear_route_edge_guard(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(_state("S09"))
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S09",
+                    round_no=10,
+                    player_state="MOVING",
+                    next_node_id="S10",
+                    nodes=[
+                        {
+                            "nodeId": "S10",
+                            "hasObstacle": False,
+                            "resourceStock": {},
+                            "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                        }
+                    ],
+                )
+            )
+        )
+
+        pivot_edge = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S08",
             squad_available=0,
             squad_in_flight=0,
             nodes=[
@@ -584,7 +629,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "WAIT"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 

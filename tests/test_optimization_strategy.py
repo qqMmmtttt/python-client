@@ -268,7 +268,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "MOVE", "targetNodeId": "S07"},
+                {"action": "MOVE", "targetNodeId": "S08"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(state),
@@ -310,7 +310,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "WAIT"},
+                {"action": "MOVE", "targetNodeId": "S08"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(pivot_edge),

@@ -76,7 +76,7 @@ class StrategyPipeline:
                 for category in chosen.categories
             }
             self._logger.important(
-                "decision round=%s strategy=%s categories=%s actions=%s",
+                "decision round=%s strategy=%s categories=%s actions=%s | 策略管线已完成本帧动作合并：列出采纳策略、动作类别与最终提交动作",
                 state.round_no,
                 "+".join(chosen.strategy_name for chosen in ordered),
                 sorted(used_categories),
@@ -84,7 +84,7 @@ class StrategyPipeline:
             )
             return ordered_actions
         self._logger.important(
-            "decision round=%s strategy=none actions=[]",
+            "decision round=%s strategy=none actions=[] | 本帧无策略产出动作，将提交空动作心跳",
             state.round_no,
         )
         return []
