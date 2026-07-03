@@ -666,19 +666,19 @@
       <div class="hero-copy">
         <p class="kicker"><span class="seal">荔</span> Python Client Visual Brief</p>
         <h1>架构与策略一屏读懂</h1>
-        <p>当前客户端围绕“协议稳定、日志可复盘、策略可扩展、送达优先”组织。第一轮地图的主线已锁定为从南岭驿前往江南码头乘船，并在水路换运后进入洛阳、武关、朱雀门。</p>
+        <p>当前客户端围绕“协议稳定、日志可复盘、策略可扩展、送达优先”组织。默认路线不再锁死水路，而是按天气、任务收益、处理耗时、阻挡和设卡动态选择。</p>
         <div class="hero-metrics" aria-label="当前工程概览">
-          <div class="metric"><strong>6</strong><span>默认策略模块</span></div>
+          <div class="metric"><strong>7</strong><span>默认策略模块</span></div>
           <div class="metric"><strong>4</strong><span>动作类别合并</span></div>
-          <div class="metric"><strong>62</strong><span>回归测试通过</span></div>
-          <div class="metric"><strong>水路</strong><span>S02 -> S04 -> S05</span></div>
+          <div class="metric"><strong>73</strong><span>回归测试通过</span></div>
+          <div class="metric"><strong>auto</strong><span>动态路线</span></div>
         </div>
       </div>
 
       <aside class="route-map">
-        <h2>当前主路线</h2>
-        <p>最下方水路：南岭驿到江南码头乘船，再到洞庭水驿换运。</p>
-        <svg class="map-svg" viewBox="0 0 560 300" role="img" aria-label="第一轮水路主线示意图">
+        <h2>当前路线选择</h2>
+        <p>普通天气下常走水路；暴雨、阻挡或高价值任务出现时，auto 会切换到更优路线。</p>
+        <svg class="map-svg" viewBox="0 0 560 300" role="img" aria-label="动态路线示意图">
           <defs>
             <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f7f9f"></path>
@@ -729,13 +729,13 @@
               <text y="4" font-size="13" font-weight="700" fill="#26302f">S07</text>
             </g>
           </g>
-          <text x="238" y="288" fill="#2f7f9f" font-size="13" font-weight="700">强制水路前段：S02 -> S04 -> S05</text>
-          <text x="280" y="58" fill="#a77842" font-size="12">陆路任务点不再打断水路主线</text>
+          <text x="238" y="288" fill="#2f7f9f" font-size="13" font-weight="700">普通天气常选水路：S02 -> S04 -> S05</text>
+          <text x="280" y="58" fill="#a77842" font-size="12">暴雨/任务/阻挡可切换陆路</text>
         </svg>
         <div class="legend">
-          <span class="legend-item"><span class="swatch water"></span>水路主线</span>
+          <span class="legend-item"><span class="swatch water"></span>水路候选</span>
           <span class="legend-item"><span class="swatch land"></span>陆路/后段官道</span>
-          <span class="legend-item"><span class="swatch lock"></span>硬约束站点</span>
+          <span class="legend-item"><span class="swatch lock"></span>必处理节点</span>
         </div>
       </aside>
     </section>
@@ -768,7 +768,7 @@
         </article>
         <article class="module strategy">
           <h3>策略层</h3>
-          <p>窗口、小分队、任务、资源、急策、交付六个策略解耦组合。</p>
+          <p>窗口、小分队、任务、资源、急策、设卡、交付七个策略解耦组合。</p>
           <div class="chips"><span class="chip">strategies/factory.py</span><span class="chip">strategies/delivery.py</span></div>
         </article>
         <article class="module ops">
@@ -802,19 +802,20 @@
       <div class="pipeline">
         <article class="strategy-card"><span class="index">1</span><h3>Combat</h3><p>窗口争夺出牌，优先护卫点、献贡、文书、强行。</p></article>
         <article class="strategy-card"><span class="index">2</span><h3>Squad</h3><p>提前探路、远程清障、削弱敌方设卡，不占主车队动作。</p></article>
-        <article class="strategy-card"><span class="index">3</span><h3>Task</h3><p>当前节点可安全做任务时提交 CLAIM_TASK。</p></article>
-        <article class="strategy-card"><span class="index">4</span><h3>Resource</h3><p>领取关键资源，使用冰鉴、马类、情报；路线边只用马。</p></article>
-        <article class="strategy-card"><span class="index">5</span><h3>Rush</h3><p>冲刺阶段路线边时间偏紧时使用疾行令。</p></article>
-        <article class="strategy-card"><span class="index">6</span><h3>Delivery</h3><p>固定处理、水路主线、阻挡处理、宫门验核、终点交付。</p></article>
+        <article class="strategy-card"><span class="index">3</span><h3>Task</h3><p>按 90/110/130 阈值和绕路成本选择安全任务。</p></article>
+        <article class="strategy-card"><span class="index">4</span><h3>Resource</h3><p>领取冰鉴、马类、文书、情报；路线边只用马。</p></article>
+        <article class="strategy-card"><span class="index">5</span><h3>Rush</h3><p>冲刺阶段按时间和鲜度选择疾行令或护果令。</p></article>
+        <article class="strategy-card"><span class="index">6</span><h3>Guard</h3><p>任务基础分达 90 后，在对手必经高价值节点保守设卡。</p></article>
+        <article class="strategy-card"><span class="index">7</span><h3>Delivery</h3><p>固定处理、动态路线、阻挡处理、宫门验核、终点交付。</p></article>
       </div>
     </section>
 
     <section class="section">
       <div class="section-head">
         <h2>主线策略</h2>
-        <p>S02/S04/S05 是水路前段硬约束：即使出现 S03/S07 的高分任务，也不打断从南岭驿去江南码头乘船的路径。</p>
+        <p>S02 前段交接是必做流程；之后由 auto 在水路、陆路、任务绕行和阻挡规避之间动态选择。</p>
       </div>
-      <div class="lane-board" aria-label="水路主线节点序列">
+      <div class="lane-board" aria-label="普通天气水路候选节点序列">
         <div class="node">S01<small>岭南果园</small></div>
         <div class="arrow">→</div>
         <div class="node locked">S02<small>南岭驿<br>PROCESS</small></div>
@@ -872,7 +873,10 @@
         <div class="priority"><b>115</b><span>CLEAR / BREAK / PASS</span></div>
         <div class="priority"><b>105</b><span>PROCESS</span></div>
         <div class="priority"><b>100</b><span>CLAIM_TASK</span></div>
+        <div class="priority"><b>99-95</b><span>CLAIM RESOURCE</span></div>
+        <div class="priority"><b>97</b><span>RUSH SPEED / PROTECT</span></div>
         <div class="priority"><b>96-94</b><span>ICE / HORSE</span></div>
+        <div class="priority"><b>92</b><span>SET_GUARD</span></div>
         <div class="priority"><b>90</b><span>MOVE</span></div>
         <div class="priority"><b>30</b><span>INTEL</span></div>
       </div>

@@ -208,17 +208,44 @@ def _task_has_safe_timing(state: GameState, task: dict[str, Any], target: TaskTa
     return finish_round + delivery_rounds + DELIVERY_SAFETY_MARGIN < 600
 
 
-def _target_sort_key(state: GameState, target: TaskTarget) -> tuple[int, int, int, int]:
+def _target_sort_key(state: GameState, target: TaskTarget) -> tuple[int, int, int, int, int, int, int]:
     template_id = target.template_id
     score = target.score
-    if state.me and state.me.task_score >= TASK_SCORE_GOAL and template_id not in HIGH_VALUE_TEMPLATES:
+    current_score = state.me.task_score if state.me else 0
+    if current_score >= TASK_SCORE_GOAL and template_id not in HIGH_VALUE_TEMPLATES:
         score -= 8
+    threshold_bonus = _threshold_bonus(current_score, target.score)
+    process_round = int(target.task.get("processRound") or 5)
+    effort = max(1, target.estimated_rounds + process_round)
+    efficiency = int(target.score * 100 / effort)
+    detour = _task_detour_rounds(state, target, process_round)
     return (
+        threshold_bonus,
         score,
         TASK_TEMPLATE_PRIORITY.get(template_id, 0),
+        efficiency,
+        -detour,
         -target.estimated_rounds,
         -int(target.task.get("expireRound") or 9999),
     )
+
+
+def _threshold_bonus(current_score: int, task_score_value: int) -> int:
+    next_score = current_score + task_score_value
+    bonus = 0
+    for threshold in (90, 110, 130):
+        if current_score < threshold <= next_score:
+            bonus += 2 if threshold == 90 else 1
+    return bonus
+
+
+def _task_detour_rounds(state: GameState, target: TaskTarget, process_round: int) -> int:
+    player = state.me
+    if player is None or not player.current_node_id:
+        return target.estimated_rounds + process_round
+    direct = estimate_delivery_rounds(state, player.current_node_id, player.verified)
+    after_task = estimate_delivery_rounds(state, target.stand_node_id, player.verified)
+    return max(0, target.estimated_rounds + process_round + after_task - direct)
 
 
 def _task_sort_key(state: GameState, task: dict[str, Any]) -> tuple[int, int, int]:

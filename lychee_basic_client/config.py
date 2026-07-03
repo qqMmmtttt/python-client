@@ -32,8 +32,8 @@ def parse_args() -> Config:
         choices=["auto", "first-round-water", "first-round-safe", "generic"],
         default="auto",
         help=(
-            "Route policy profile. auto anchors the known first-round map to water route "
-            "and falls back to dynamic routing on unknown maps."
+            "Route policy profile. auto uses dynamic routing with weather, process, "
+            "obstacle, residue and guard costs. first-round-water forces the known water route."
         ),
     )
     args = parser.parse_args()

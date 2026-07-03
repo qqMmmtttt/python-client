@@ -7,10 +7,36 @@ from lychee_basic_client.rules.buffs import has_move_buff
 from lychee_basic_client.rules.states import NODE_BUSY_STATES, ROUTE_EDGE_STATES
 from lychee_basic_client.strategies.context import StrategyContext
 
-USEFUL_PICKUPS = ("FAST_HORSE", "SHORT_HORSE", "ICE_BOX", "INTEL")
+USEFUL_PICKUPS = (
+    "ICE_BOX",
+    "FAST_HORSE",
+    "SHORT_HORSE",
+    "PASS_TOKEN",
+    "OFFICIAL_PERMIT",
+    "INTEL",
+    "BOAT_RIGHT",
+)
 HORSE_RESOURCES = ("FAST_HORSE", "SHORT_HORSE")
 INTEL_TARGETS = ("S11", "S13", "S14", "S04", "S05")
 INTEL_RANGE_LIMIT = 15
+RESOURCE_TARGET_STOCK = {
+    "ICE_BOX": 2,
+    "FAST_HORSE": 1,
+    "SHORT_HORSE": 1,
+    "PASS_TOKEN": 1,
+    "OFFICIAL_PERMIT": 1,
+    "INTEL": 2,
+    "BOAT_RIGHT": 1,
+}
+RESOURCE_PICKUP_MARGIN = {
+    "ICE_BOX": 35,
+    "FAST_HORSE": 38,
+    "SHORT_HORSE": 34,
+    "PASS_TOKEN": 32,
+    "OFFICIAL_PERMIT": 32,
+    "INTEL": 28,
+    "BOAT_RIGHT": 18,
+}
 
 
 class ResourceStrategy:
@@ -42,7 +68,7 @@ class ResourceStrategy:
 
         if (
             player.freshness
-            and player.freshness < 75
+            and player.freshness < _ice_box_threshold(state)
             and player.resources.get("ICE_BOX", 0) > 0
             and player.current_node_id
             and _delivery_still_safe(state, player.current_node_id, margin=25)
@@ -62,9 +88,18 @@ class ResourceStrategy:
         ):
             node = state.nodes.get(player.current_node_id)
             if node:
-                for resource_type in USEFUL_PICKUPS:
+                resource_types = sorted(
+                    USEFUL_PICKUPS,
+                    key=lambda item: _pickup_sort_key(state, player, item),
+                    reverse=True,
+                )
+                for resource_type in resource_types:
                     key = (player.current_node_id, resource_type)
-                    if node.resource_stock.get(resource_type, 0) > 0 and key not in self._attempted_pickups:
+                    if (
+                        node.resource_stock.get(resource_type, 0) > 0
+                        and key not in self._attempted_pickups
+                        and _should_claim_resource(state, player, resource_type)
+                    ):
                         self._attempted_pickups.add(key)
                         return [claim_resource(player.current_node_id, resource_type)]
         return []
@@ -92,6 +127,50 @@ def _has_active_t06(state: Any) -> bool:
         if task.get("active", True) and not task.get("completed") and not task.get("failed"):
             return True
     return False
+
+
+def _ice_box_threshold(state: Any) -> float:
+    if state.phase == "RUSH" or state.weather.has_active("HOT"):
+        return 84
+    return 72
+
+
+def _should_claim_resource(state: Any, player: Any, resource_type: str) -> bool:
+    if player.resources.get(resource_type, 0) >= RESOURCE_TARGET_STOCK.get(resource_type, 1):
+        return False
+    if resource_type == "BOAT_RIGHT" and player.current_node_id != "S04":
+        return False
+    if resource_type in {"PASS_TOKEN", "OFFICIAL_PERMIT"} and _document_stock(player) >= 1:
+        return False
+    margin = RESOURCE_PICKUP_MARGIN.get(resource_type, 35)
+    return bool(
+        player.current_node_id
+        and _delivery_still_safe(state, player.current_node_id, margin=margin)
+    )
+
+
+def _pickup_sort_key(state: Any, player: Any, resource_type: str) -> tuple[int, int]:
+    if resource_type == "ICE_BOX":
+        value = 100 if player.freshness < 85 or state.weather.has_active("HOT") else 82
+    elif resource_type == "FAST_HORSE":
+        value = 94
+    elif resource_type == "SHORT_HORSE":
+        value = 88
+    elif resource_type == "INTEL":
+        value = 78
+    elif resource_type in {"PASS_TOKEN", "OFFICIAL_PERMIT"}:
+        value = 72
+    elif resource_type == "BOAT_RIGHT":
+        value = 45
+    else:
+        value = 0
+    if state.phase == "RUSH" and resource_type in {"PASS_TOKEN", "OFFICIAL_PERMIT"}:
+        value += 10
+    return (value, -RESOURCE_PICKUP_MARGIN.get(resource_type, 35))
+
+
+def _document_stock(player: Any) -> int:
+    return player.resources.get("PASS_TOKEN", 0) + player.resources.get("OFFICIAL_PERMIT", 0)
 
 
 def _intel_action_if_useful(

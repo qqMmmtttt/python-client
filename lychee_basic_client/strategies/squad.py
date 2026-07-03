@@ -1,8 +1,9 @@
-from typing import Any
+from typing import Any, Optional
 
 from lychee_basic_client.protocol.actions import squad_clear, squad_scout, squad_weaken
 from lychee_basic_client.rules.blocking import enemy_guard_at
 from lychee_basic_client.strategies.context import StrategyContext
+from lychee_basic_client.strategies.routing import RoutePolicy
 
 
 SCOUT_TARGETS = ("S04", "S05", "S11", "S13", "S14")
@@ -11,7 +12,8 @@ SCOUT_TARGETS = ("S04", "S05", "S11", "S13", "S14")
 class SquadStrategy:
     """Independent small-team actions that should not block the main convoy."""
 
-    def __init__(self) -> None:
+    def __init__(self, route_policy: Optional[RoutePolicy] = None) -> None:
+        self._route_policy = route_policy
         self._dispatched_scout_targets: set[str] = set()
         self._dispatched_clear_targets: set[str] = set()
         self._dispatched_weaken_targets: set[str] = set()
@@ -30,12 +32,12 @@ class SquadStrategy:
         if state.phase == "RUSH" or player.squad_available <= 0:
             return []
 
-        weaken_target = _weaken_target_on_route(context, self._dispatched_weaken_targets)
+        weaken_target = _weaken_target_on_route(context, self._dispatched_weaken_targets, self._route_policy)
         if weaken_target and player.squad_available >= 2:
             self._dispatched_weaken_targets.add(weaken_target)
             return [squad_weaken(weaken_target)]
 
-        clear_target = _clear_target_on_route(context, self._dispatched_clear_targets)
+        clear_target = _clear_target_on_route(context, self._dispatched_clear_targets, self._route_policy)
         if clear_target and player.squad_available >= 2:
             self._dispatched_clear_targets.add(clear_target)
             return [squad_clear(clear_target)]
@@ -58,6 +60,7 @@ class SquadStrategy:
 def _clear_target_on_route(
     context: StrategyContext,
     dispatched_clear_targets: set[str],
+    route_policy: Optional[RoutePolicy],
 ) -> str:
     state = context.state
     player = state.me
@@ -65,7 +68,7 @@ def _clear_target_on_route(
         return ""
 
     target = state.game_map.terminal_node_ids[0] if player.verified else state.game_map.gate_node_id
-    path = state.game_map.fastest_path(player.current_node_id, target)
+    path = _route_path(state, player.current_node_id, target, route_policy)
     for node_id in path[1:]:
         if node_id in dispatched_clear_targets:
             continue
@@ -78,6 +81,7 @@ def _clear_target_on_route(
 def _weaken_target_on_route(
     context: StrategyContext,
     dispatched_targets: set[str],
+    route_policy: Optional[RoutePolicy],
 ) -> str:
     state = context.state
     player = state.me
@@ -85,7 +89,7 @@ def _weaken_target_on_route(
         return ""
 
     target = state.game_map.terminal_node_ids[0] if player.verified else state.game_map.gate_node_id
-    path = state.game_map.fastest_path(player.current_node_id, target)
+    path = _route_path(state, player.current_node_id, target, route_policy)
     for node_id in path[1:]:
         if node_id in dispatched_targets:
             continue
@@ -105,3 +109,14 @@ def _has_own_scout_marker(context: StrategyContext, target_node_id: str) -> bool
         if marker.get("playerId") == state.player_id or marker.get("teamId") == player.team_id:
             return True
     return False
+
+
+def _route_path(
+    state: Any,
+    current: str,
+    target: str,
+    route_policy: Optional[RoutePolicy],
+) -> list[str]:
+    if route_policy is not None:
+        return route_policy.path(state, current, target)
+    return state.game_map.fastest_path(current, target)

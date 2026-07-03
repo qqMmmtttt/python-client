@@ -13,3 +13,7 @@ def has_buff(raw_player: dict[str, Any], buff_types: frozenset[str]) -> bool:
 
 def has_move_buff(raw_player: dict[str, Any]) -> bool:
     return has_buff(raw_player, MOVE_BUFF_TYPES)
+
+
+def has_protect_buff(raw_player: dict[str, Any]) -> bool:
+    return has_buff(raw_player, PROTECT_BUFF_TYPES)

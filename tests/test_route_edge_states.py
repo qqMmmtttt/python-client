@@ -84,6 +84,17 @@ class RouteEdgeStateTests(unittest.TestCase):
             RushStrategy().decide(StrategyContext.from_state(state)),
         )
 
+    def test_rush_speed_waits_when_horse_resource_is_available(self) -> None:
+        state = _state(
+            "MOVING",
+            phase="RUSH",
+            round_no=535,
+            good_fruit=80,
+            resources={"FAST_HORSE": 1},
+        )
+
+        self.assertEqual([], RushStrategy().decide(StrategyContext.from_state(state)))
+
     def test_station_task_strategy_does_not_run_while_waiting_on_route_edge(self) -> None:
         state = _state("WAITING")
 

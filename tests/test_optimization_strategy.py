@@ -16,12 +16,37 @@ def _state(
     *,
     round_no: int = 1,
     phase: str = "NORMAL",
+    player_state: str = "IDLE",
+    next_node_id: Optional[str] = None,
+    verified: bool = False,
+    task_score: int = 0,
+    total_score: int = 0,
+    good_fruit: int = 100,
+    freshness: float = 90,
     resources: Optional[dict[str, int]] = None,
     squad_available: int = 8,
     nodes: Optional[list[dict[str, Any]]] = None,
     events: Optional[list[dict[str, Any]]] = None,
+    weather: Optional[dict[str, Any]] = None,
+    extra_players: Optional[list[dict[str, Any]]] = None,
 ) -> GameState:
     map_config = json.loads(Path("example_data/map_config.json").read_text(encoding="utf-8"))
+    player = {
+        "playerId": 1001,
+        "teamId": "RED",
+        "state": player_state,
+        "currentNodeId": node_id,
+        "nextNodeId": next_node_id,
+        "verified": verified,
+        "goodFruit": good_fruit,
+        "freshness": freshness,
+        "resources": resources or {},
+        "squadAvailable": squad_available,
+        "taskScore": task_score,
+        "totalScore": total_score,
+        "buffs": [],
+    }
+    players = [player, *(extra_players or [])]
     state = GameState.from_start(
         {
             "matchId": "match-real-map",
@@ -30,20 +55,8 @@ def _state(
             "nodes": map_config["nodes"],
             "edges": map_config["edges"],
             "processNodes": map_config["processNodes"],
-            "players": [
-                {
-                    "playerId": 1001,
-                    "teamId": "RED",
-                    "state": "IDLE",
-                    "currentNodeId": node_id,
-                    "verified": False,
-                    "goodFruit": 100,
-                    "freshness": 90,
-                    "resources": resources or {},
-                    "squadAvailable": squad_available,
-                }
-            ],
-            "weather": {},
+            "players": players,
+            "weather": weather or {},
         },
         1001,
     )
@@ -52,22 +65,11 @@ def _state(
             "matchId": "match-real-map",
             "round": round_no,
             "phase": phase,
-            "players": [
-                {
-                    "playerId": 1001,
-                    "teamId": "RED",
-                    "state": "IDLE",
-                    "currentNodeId": node_id,
-                    "verified": False,
-                    "goodFruit": 100,
-                    "freshness": 90,
-                    "resources": resources or {},
-                    "squadAvailable": squad_available,
-                }
-            ],
+            "players": players,
             "nodes": nodes or [],
             "tasks": [],
             "events": events or [],
+            "weather": weather or {},
             "contests": [],
             "actionResults": [],
         },
@@ -175,6 +177,181 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [{"action": "CLEAR", "targetNodeId": "S10"}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_claims_high_value_resource_before_plain_move(self) -> None:
+        state = _state(
+            "S09",
+            round_no=250,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {"FAST_HORSE": 1}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "CLAIM_RESOURCE", "targetNodeId": "S09", "resourceType": "FAST_HORSE"}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_keeps_blocking_clear_ahead_of_resource_claim(self) -> None:
+        state = _state(
+            "S09",
+            round_no=250,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {"FAST_HORSE": 1}},
+                {"nodeId": "S10", "hasObstacle": True, "obstacleType": "FLOOD", "resourceStock": {}},
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "CLEAR", "targetNodeId": "S10"}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_sets_key_guard_after_task_threshold(self) -> None:
+        state = _state(
+            "S10",
+            round_no=260,
+            task_score=90,
+            squad_available=0,
+            nodes=[{"nodeId": "S10", "hasObstacle": False, "resourceStock": {}}],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 0}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_can_guard_gate_when_opponent_still_needs_it(self) -> None:
+        state = _state(
+            "S14",
+            round_no=390,
+            task_score=90,
+            squad_available=0,
+            nodes=[{"nodeId": "S14", "hasObstacle": False, "resourceStock": {}}],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S11",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S14", "extraGoodFruit": 0}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_does_not_guard_node_outside_opponent_route(self) -> None:
+        state = _state(
+            "S07",
+            round_no=260,
+            task_score=90,
+            squad_available=0,
+            nodes=[{"nodeId": "S07", "hasObstacle": False, "resourceStock": {}}],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertNotEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S07", "extraGoodFruit": 0}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_avoids_guard_when_far_ahead_on_score(self) -> None:
+        state = _state(
+            "S10",
+            round_no=260,
+            task_score=90,
+            total_score=180,
+            squad_available=0,
+            nodes=[{"nodeId": "S10", "hasObstacle": False, "resourceStock": {}}],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                    "totalScore": 100,
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S11"}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_waits_to_guard_until_task_threshold(self) -> None:
+        state = _state(
+            "S10",
+            round_no=260,
+            task_score=60,
+            squad_available=0,
+            nodes=[{"nodeId": "S10", "hasObstacle": False, "resourceStock": {}}],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S11"}],
+            strategy.decide(state),
+        )
+
+    def test_pipeline_uses_rush_protect_when_freshness_is_dangerous(self) -> None:
+        state = _state(
+            "S12",
+            round_no=460,
+            phase="RUSH",
+            freshness=40,
+            squad_available=0,
+            nodes=[{"nodeId": "S12", "hasObstacle": False, "resourceStock": {}}],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "RUSH_PROTECT"}],
             strategy.decide(state),
         )
 

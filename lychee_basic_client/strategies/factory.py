@@ -2,6 +2,7 @@ from lychee_basic_client.config import Config
 
 from .combat import CombatStrategy
 from .delivery import DeliveryStrategy
+from .guard import GuardStrategy
 from .pipeline import StrategyPipeline
 from .resources import ResourceStrategy
 from .routing import RoutePolicy
@@ -15,10 +16,11 @@ def build_strategy(config: Config) -> StrategyPipeline:
     return StrategyPipeline(
         [
             CombatStrategy(),
-            SquadStrategy(),
+            SquadStrategy(route_policy),
             TaskStrategy(),
             ResourceStrategy(),
             RushStrategy(),
+            GuardStrategy(),
             DeliveryStrategy(route_policy),
         ]
     )

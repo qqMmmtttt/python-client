@@ -113,6 +113,15 @@ RESOURCE_PRIORITY = {
     "SHORT_HORSE": 94,
     "INTEL": 30,
 }
+RESOURCE_CLAIM_PRIORITY = {
+    "ICE_BOX": 99,
+    "FAST_HORSE": 98,
+    "SHORT_HORSE": 97,
+    "PASS_TOKEN": 95,
+    "OFFICIAL_PERMIT": 95,
+    "INTEL": 91,
+    "BOAT_RIGHT": 89,
+}
 
 
 def _action_categories(action: dict[str, Any]) -> set[str]:
@@ -154,16 +163,18 @@ def _action_priority(action: dict[str, Any]) -> int:
         return 105
     if action_type == "CLAIM_TASK":
         return 100
+    if action_type == "SET_GUARD":
+        return 92
+    if action_type == "CLAIM_RESOURCE":
+        return RESOURCE_CLAIM_PRIORITY.get(str(action.get("resourceType") or ""), 80)
     if action_type == "MOVE":
         return 90
     if action_type == "RUSH_SPEED":
-        return 88
+        return 97
     if action_type == "RUSH_PROTECT":
-        return 86
+        return 97
     if action_type == "USE_RESOURCE":
         return RESOURCE_PRIORITY.get(str(action.get("resourceType") or ""), 40)
-    if action_type == "CLAIM_RESOURCE":
-        return 25
     if action_type in SQUAD_ACTIONS:
         return 70
     if action_type in WINDOW_ACTIONS:

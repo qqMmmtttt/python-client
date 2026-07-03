@@ -4,10 +4,7 @@ from typing import Optional
 from lychee_basic_client.config import Config
 from lychee_basic_client.models.map import Edge, GameMap
 from lychee_basic_client.models.state import GameState
-from lychee_basic_client.planning.route_profiles import (
-    FIRST_ROUND_WATER_EDGE_DISTANCES,
-    FIRST_ROUND_WATER_ROUTE,
-)
+from lychee_basic_client.planning.route_profiles import FIRST_ROUND_WATER_ROUTE
 from lychee_basic_client.rules.blocking import enemy_guard_at, obstacle_residue_tax_round
 
 
@@ -16,14 +13,16 @@ class RoutePolicy:
         self._profile_name = config.route_profile
 
     def next_hop(self, state: GameState, current: str, target: str) -> Optional[str]:
-        profile_hop = self._profile_next_hop(state.game_map, current, target)
-        if profile_hop is not None:
-            return profile_hop
-
-        path = self._dynamic_path(state, current, target)
+        path = self.path(state, current, target)
         if len(path) >= 2:
             return path[1]
         return None
+
+    def path(self, state: GameState, current: str, target: str) -> list[str]:
+        profile_path = self._profile_path(state.game_map, current, target)
+        if profile_path:
+            return profile_path
+        return self._dynamic_path(state, current, target)
 
     def profile_next_hop(
         self, state: GameState, current: str, target: str
@@ -33,18 +32,21 @@ class RoutePolicy:
     def _profile_next_hop(
         self, game_map: GameMap, current: str, target: str
     ) -> Optional[str]:
-        if self._profile_name == "generic":
-            return None
-        if self._profile_name == "auto":
-            if not _route_signature_matches(
-                game_map,
-                FIRST_ROUND_WATER_EDGE_DISTANCES,
-            ):
-                return None
-            return _profile_hop(game_map, FIRST_ROUND_WATER_ROUTE, current, target)
-        if self._profile_name in {"first-round-safe", "first-round-water"}:
-            return _profile_hop(game_map, FIRST_ROUND_WATER_ROUTE, current, target)
+        path = self._profile_path(game_map, current, target)
+        if len(path) >= 2:
+            return path[1]
         return None
+
+    def _profile_path(
+        self, game_map: GameMap, current: str, target: str
+    ) -> list[str]:
+        if self._profile_name == "generic":
+            return []
+        if self._profile_name == "auto":
+            return []
+        if self._profile_name in {"first-round-safe", "first-round-water"}:
+            return _profile_path(game_map, FIRST_ROUND_WATER_ROUTE, current, target)
+        return []
 
     def _dynamic_path(self, state: GameState, start: str, target: str) -> list[str]:
         if start == target:
@@ -69,36 +71,18 @@ class RoutePolicy:
         return []
 
 
-def _profile_hop(
+def _profile_path(
     game_map: GameMap, route: list[str], current: str, target: str
-) -> Optional[str]:
+) -> list[str]:
     if not _route_profile_available(game_map, route):
-        return None
+        return []
     if current not in route or target not in route:
-        return None
+        return []
     current_index = route.index(current)
     target_index = route.index(target)
     if current_index >= target_index:
-        return None
-    candidate = route[current_index + 1]
-    if candidate in game_map.neighbors(current):
-        return candidate
-    return None
-
-
-def _route_signature_matches(game_map: GameMap, distances: dict[tuple[str, str], int]) -> bool:
-    for (left, right), distance in distances.items():
-        edge = _edge_between(game_map, left, right)
-        if edge is None or edge.distance != distance:
-            return False
-    return True
-
-
-def _edge_between(game_map: GameMap, left: str, right: str) -> Optional[Edge]:
-    for edge, neighbor in game_map.iter_neighbor_edges(left):
-        if neighbor == right:
-            return edge
-    return None
+        return []
+    return route[current_index : target_index + 1]
 
 
 def _route_profile_available(game_map: GameMap, route: list[str]) -> bool:

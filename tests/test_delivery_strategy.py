@@ -78,7 +78,7 @@ class DeliveryStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(state)),
         )
 
-    def test_processes_required_station_once_then_can_enter_water_route(self) -> None:
+    def test_processes_required_station_once_then_can_follow_dynamic_route(self) -> None:
         strategy = self._strategy()
         state = _state("S02")
         strategy.on_start(state)
@@ -102,8 +102,39 @@ class DeliveryStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(completed)),
         )
 
-    def test_water_route_is_not_diverted_to_land_task_after_s02(self) -> None:
+    def test_auto_route_can_take_safe_land_task_after_s02(self) -> None:
         strategy = self._strategy()
+        state = _state("S02")
+        strategy.on_start(state)
+        strategy.decide(StrategyContext.from_state(state))
+
+        completed = _state(
+            "S02",
+            tasks=[
+                {
+                    "taskId": "task-s03",
+                    "taskTemplateId": "T01",
+                    "nodeId": "S03",
+                    "score": 30,
+                    "active": True,
+                    "processRound": 3,
+                }
+            ],
+            events=[
+                {
+                    "type": "PROCESS_COMPLETE",
+                    "payload": {"playerId": 1001, "targetNodeId": "S02"},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S03"}],
+            strategy.decide(StrategyContext.from_state(completed)),
+        )
+
+    def test_explicit_water_profile_is_not_diverted_to_land_task_after_s02(self) -> None:
+        strategy = self._strategy(route_profile="first-round-water")
         state = _state("S02")
         strategy.on_start(state)
         strategy.decide(StrategyContext.from_state(state))
@@ -133,8 +164,39 @@ class DeliveryStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(completed)),
         )
 
-    def test_water_route_continues_from_dock_to_water_station(self) -> None:
+    def test_auto_route_can_leave_dock_for_safe_land_task(self) -> None:
         strategy = self._strategy()
+        state = _state("S04")
+        strategy.on_start(state)
+        strategy.decide(StrategyContext.from_state(state))
+
+        completed = _state(
+            "S04",
+            tasks=[
+                {
+                    "taskId": "task-s07",
+                    "taskTemplateId": "T02",
+                    "nodeId": "S07",
+                    "score": 30,
+                    "active": True,
+                    "processRound": 4,
+                }
+            ],
+            events=[
+                {
+                    "type": "PROCESS_COMPLETE",
+                    "payload": {"playerId": 1001, "targetNodeId": "S04"},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S07"}],
+            strategy.decide(StrategyContext.from_state(completed)),
+        )
+
+    def test_explicit_water_profile_continues_from_dock_to_water_station(self) -> None:
+        strategy = self._strategy(route_profile="first-round-water")
         state = _state("S04")
         strategy.on_start(state)
         strategy.decide(StrategyContext.from_state(state))
