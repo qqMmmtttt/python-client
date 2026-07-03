@@ -88,9 +88,17 @@ class DeliveryStrategy:
             return []
 
         if player.state in ROUTE_EDGE_STATES:
-            return self._decide_while_moving(state, player)
-
-        if player.state != "IDLE":
+            if player.next_node_id:
+                return self._decide_while_moving(state, player)
+            self._logger.important(
+                "node_wait_treat_as_idle round=%s state=%s node=%s next=%s"
+                " | 节点上的 WAITING（无 next_node_id）：窗口争夺败方等被动等待场景，按 IDLE 处理继续节点决策",
+                state.round_no,
+                player.state,
+                player.current_node_id,
+                player.next_node_id,
+            )
+        elif player.state != "IDLE":
             return []
 
         if not player.current_node_id:
@@ -549,27 +557,43 @@ class DeliveryStrategy:
         if not origin_node_id:
             return None
         neighbors = set(state.game_map.neighbors(origin_node_id))
+        forward_neighbors = (
+            {current_next_node_id} & neighbors if current_next_node_id else set()
+        )
+        excluded_nodes = neighbors - forward_neighbors
+        if excluded_nodes:
+            self._guard_logger.important(
+                "round=%s 【设卡处理｜隔离回头节点】\n"
+                "  位置：路线起点=%s，当前朝向=%s\n"
+                "  过滤：只允许当前朝向目标=%s 作为 recovery target，排除其他邻居=%s，绝不调头",
+                state.round_no,
+                origin_node_id,
+                current_next_node_id,
+                sorted(forward_neighbors),
+                sorted(excluded_nodes),
+            )
         if (
             current_next_node_id
-            and current_next_node_id in neighbors
+            and current_next_node_id in forward_neighbors
             and self._route_edge_target_blocked_by_guard(state, current_next_node_id)
         ):
             return current_next_node_id
 
         for target_node_id in sorted(self._guard_blocked_move_targets):
-            if target_node_id in neighbors:
+            if target_node_id in forward_neighbors:
                 return target_node_id
 
         visible_guard_target = self._visible_adjacent_guard_recovery_target(
             state,
             origin_node_id,
             current_next_node_id,
+            excluded_nodes=excluded_nodes,
         )
         if visible_guard_target:
             return visible_guard_target
 
         for target_node_id in sorted(self._route_edge_resume_targets):
-            if target_node_id in neighbors:
+            if target_node_id in forward_neighbors:
                 return target_node_id
         return None
 
@@ -578,12 +602,15 @@ class DeliveryStrategy:
         state: GameState,
         origin_node_id: str,
         current_next_node_id: Optional[str],
+        excluded_nodes: Optional[set[str]] = None,
     ) -> Optional[str]:
         player = state.me
+        excluded = excluded_nodes or set()
         guarded_neighbors = [
             node_id
             for node_id in state.game_map.neighbors(origin_node_id)
-            if enemy_guard_at(state.nodes.get(node_id), player) is not None
+            if node_id not in excluded
+            and enemy_guard_at(state.nodes.get(node_id), player) is not None
         ]
         if not guarded_neighbors:
             return None
