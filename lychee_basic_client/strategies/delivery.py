@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from lychee_basic_client.models.state import GameState
@@ -16,6 +17,7 @@ from lychee_basic_client.protocol.actions import (
 from lychee_basic_client.rules.blocking import enemy_guard_at
 from lychee_basic_client.rules.states import NODE_BUSY_STATES, ROUTE_EDGE_STATES
 from lychee_basic_client.strategies.context import StrategyContext
+from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.strategies.routing import RoutePolicy
 
 
@@ -24,6 +26,7 @@ class DeliveryStrategy:
 
     def __init__(self, route_policy: RoutePolicy) -> None:
         self._route_policy = route_policy
+        self._logger = get_logger("strategies.delivery")
         self._completed_process_nodes: set[str] = set()
         self._pending_process_node: Optional[str] = None
         self._last_settled_node: Optional[str] = None
@@ -113,9 +116,9 @@ class DeliveryStrategy:
         if next_node is None:
             return []
 
-        blocking_action = self._blocking_action_if_needed(state, next_node)
-        if blocking_action:
-            return [blocking_action]
+        blocking_decision = self._blocking_decision_if_needed(state, next_node)
+        if blocking_decision is not None:
+            return [blocking_decision.action] if blocking_decision.action else []
 
         return [self._move(next_node)]
 
@@ -123,12 +126,15 @@ class DeliveryStrategy:
         self, state: GameState, player: Any
     ) -> list[dict[str, Any]]:
         if player.next_node_id:
-            recovery_action = self._route_edge_recovery_action_if_needed(
-                state,
-                player.next_node_id,
-            )
-            if recovery_action:
-                return [recovery_action]
+            if player.next_node_id in self._guard_blocked_move_targets:
+                self._logger.important(
+                    "guard_blocked_on_route_edge round=%s state=%s from=%s to=%s action=MOVE_ONLY",
+                    state.round_no,
+                    player.state,
+                    player.current_node_id,
+                    player.next_node_id,
+                )
+            return [self._move(player.next_node_id)]
         return []
 
     def _move(self, target_node_id: str) -> dict[str, Any]:
@@ -152,9 +158,9 @@ class DeliveryStrategy:
         self._pending_process_node = current
         return process(current)
 
-    def _blocking_action_if_needed(
+    def _blocking_decision_if_needed(
         self, state: GameState, target_node_id: str
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional["_BlockingDecision"]:
         player = state.me
         if player is None:
             return None
@@ -163,16 +169,16 @@ class DeliveryStrategy:
             if target_node_id in self._guard_blocked_move_targets:
                 return self._unknown_guard_action(state, target_node_id)
             if target_node_id in self._blocked_move_targets:
-                return forced_pass(target_node_id)
+                return _BlockingDecision(forced_pass(target_node_id))
             return None
 
         if node.has_obstacle:
             t04 = find_t04_for_obstacle(state, target_node_id, self._rejected_task_ids)
             if t04 is not None and _has_delivery_slack(state, target_node_id, margin=80):
-                return claim_task(t04["taskId"])
+                return _BlockingDecision(claim_task(t04["taskId"]))
             if _should_clear_obstacle(state, target_node_id):
-                return clear(target_node_id)
-            return forced_pass(target_node_id)
+                return _BlockingDecision(clear(target_node_id))
+            return _BlockingDecision(forced_pass(target_node_id))
 
         guard = enemy_guard_at(node, player)
         if guard is not None:
@@ -181,80 +187,102 @@ class DeliveryStrategy:
         self._discard_blocked_target(target_node_id)
         return None
 
-    def _route_edge_recovery_action_if_needed(
-        self,
-        state: GameState,
-        target_node_id: str,
-    ) -> Optional[dict[str, Any]]:
-        player = state.me
-        if player is None:
-            return None
-
-        node = state.nodes.get(target_node_id)
-        if node is not None:
-            guard = enemy_guard_at(node, player)
-            if guard is not None:
-                return self._enemy_guard_action(state, target_node_id, guard.defense)
-            if target_node_id in self._guard_blocked_move_targets and node.guard is None:
-                return self._unknown_guard_action(state, target_node_id)
-            if node.has_obstacle:
-                return forced_pass(target_node_id)
-            self._discard_blocked_target(target_node_id)
-            return None
-
-        if target_node_id in self._guard_blocked_move_targets:
-            return self._unknown_guard_action(state, target_node_id)
-        if target_node_id in self._obstacle_blocked_move_targets:
-            return forced_pass(target_node_id)
-        return None
-
     def _enemy_guard_action(
         self,
         state: GameState,
         target_node_id: str,
         defense: int,
-    ) -> dict[str, Any]:
+    ) -> "_BlockingDecision":
         payment = _break_guard_payment(state, defense)
         if (
             payment is not None
             and _has_delivery_slack(state, target_node_id, margin=18)
         ):
-            return break_guard(target_node_id, **payment)
+            self._logger.important(
+                "guard_break round=%s target=%s defense=%s payment=%s mode=direct",
+                state.round_no,
+                target_node_id,
+                defense,
+                payment,
+            )
+            return _BlockingDecision(break_guard(target_node_id, **payment))
         break_order_payment = _break_guard_payment_with_break_order(state, defense)
         if (
             break_order_payment is not None
             and _has_delivery_slack(state, target_node_id, margin=18)
         ):
-            return break_guard(
+            self._logger.important(
+                "guard_break round=%s target=%s defense=%s payment=%s mode=break_order",
+                state.round_no,
                 target_node_id,
-                **break_order_payment,
-                rush_tactic="BREAK_ORDER",
+                defense,
+                break_order_payment,
             )
-        return forced_pass(target_node_id)
+            return _BlockingDecision(
+                break_guard(
+                    target_node_id,
+                    **break_order_payment,
+                    rush_tactic="BREAK_ORDER",
+                )
+            )
+        if _should_hold_for_squad_weaken(state, defense):
+            self._logger.important(
+                "guard_hold_for_squad round=%s target=%s defense=%s squad_available=%s squad_in_flight=%s",
+                state.round_no,
+                target_node_id,
+                defense,
+                state.me.squad_available if state.me else None,
+                _squad_in_flight(state.me),
+            )
+            return _BlockingDecision(None)
+        partial_payment = _partial_break_guard_payment(state)
+        if partial_payment is not None:
+            self._logger.important(
+                "guard_break round=%s target=%s defense=%s payment=%s mode=partial",
+                state.round_no,
+                target_node_id,
+                defense,
+                partial_payment,
+            )
+            return _BlockingDecision(break_guard(target_node_id, **partial_payment))
+        self._logger.important(
+            "guard_forced_pass round=%s target=%s defense=%s reason=no_break_payment",
+            state.round_no,
+            target_node_id,
+            defense,
+        )
+        return _BlockingDecision(forced_pass(target_node_id))
 
     def _unknown_guard_action(
         self,
         state: GameState,
         target_node_id: str,
-    ) -> dict[str, Any]:
+    ) -> "_BlockingDecision":
         defense_cap = _guard_defense_cap(state, target_node_id)
         payment = _break_guard_payment(state, defense_cap)
         if (
             payment is not None
             and _has_delivery_slack(state, target_node_id, margin=18)
         ):
-            return break_guard(target_node_id, **payment)
+            return _BlockingDecision(break_guard(target_node_id, **payment))
         break_order_payment = _break_guard_payment_with_break_order(state, defense_cap)
         if (
             break_order_payment is not None
             and _has_delivery_slack(state, target_node_id, margin=18)
         ):
-            return break_guard(
-                target_node_id,
-                **break_order_payment,
-                rush_tactic="BREAK_ORDER",
+            return _BlockingDecision(
+                break_guard(
+                    target_node_id,
+                    **break_order_payment,
+                    rush_tactic="BREAK_ORDER",
+                )
             )
-        return forced_pass(target_node_id)
+        if _should_hold_for_squad_weaken(state, defense_cap):
+            return _BlockingDecision(None)
+        partial_payment = _partial_break_guard_payment(state)
+        if partial_payment is not None:
+            return _BlockingDecision(break_guard(target_node_id, **partial_payment))
+        return _BlockingDecision(forced_pass(target_node_id))
 
     def _observe_process_completion(self, context: StrategyContext) -> None:
         state = context.state
@@ -331,10 +359,15 @@ class DeliveryStrategy:
         next_node = self._route_policy.profile_next_hop(state, current, gate)
         if next_node is None:
             return None
-        blocking_action = self._blocking_action_if_needed(state, next_node)
-        if blocking_action:
-            return blocking_action
+        blocking_decision = self._blocking_decision_if_needed(state, next_node)
+        if blocking_decision is not None:
+            return blocking_decision.action
         return self._move(next_node)
+
+
+@dataclass(frozen=True)
+class _BlockingDecision:
+    action: Optional[dict[str, Any]]
 
 
 def _should_bind_break_order_to_verify(state: GameState) -> bool:
@@ -403,6 +436,17 @@ def _break_guard_payment(state: GameState, defense: int) -> Optional[dict[str, i
     return {"good_fruit": good_fruit, "bad_fruit": bad_fruit}
 
 
+def _partial_break_guard_payment(state: GameState) -> Optional[dict[str, int]]:
+    player = state.me
+    if player is None:
+        return None
+    bad_fruit = min(2, player.bad_fruit)
+    good_fruit = min(2, max(0, player.good_fruit - 1))
+    if bad_fruit <= 0 and good_fruit <= 0:
+        return None
+    return {"good_fruit": good_fruit, "bad_fruit": bad_fruit}
+
+
 def _break_guard_payment_with_break_order(
     state: GameState,
     defense: int,
@@ -445,6 +489,24 @@ def _can_bind_break_order(state: GameState) -> bool:
     if player.bad_fruit >= 2:
         return True
     return player.good_fruit > 1
+
+
+def _should_hold_for_squad_weaken(state: GameState, defense: int) -> bool:
+    player = state.me
+    if player is None or defense <= 0 or state.phase == "RUSH":
+        return False
+    if player.squad_available >= 2:
+        return True
+    return _squad_in_flight(player) > 0
+
+
+def _squad_in_flight(player: Any) -> int:
+    if player is None:
+        return 0
+    try:
+        return int(player.raw.get("squadInFlight") or 0)
+    except (AttributeError, TypeError, ValueError):
+        return 0
 
 
 def _break_order_cost(player: Any) -> tuple[int, int]:

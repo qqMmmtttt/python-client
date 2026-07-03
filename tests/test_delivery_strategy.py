@@ -384,7 +384,7 @@ class DeliveryStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "FORCED_PASS", "targetNodeId": "S11"}],
+            [{"action": "BREAK_GUARD", "targetNodeId": "S11", "goodFruit": 2, "badFruit": 0}],
             strategy.decide(StrategyContext.from_state(state)),
         )
 

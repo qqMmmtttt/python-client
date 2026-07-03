@@ -114,21 +114,24 @@ class OptimizationStrategyTests(unittest.TestCase):
             ResourceStrategy().decide(StrategyContext.from_state(state)),
         )
 
-    def test_squad_strategy_scouts_process_nodes_early(self) -> None:
+    def test_squad_strategy_reserves_initial_team_for_key_pass_guards(self) -> None:
         strategy = SquadStrategy()
         state = _state("S01")
+        strategy.on_start(state)
+
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
+
+    def test_squad_strategy_scouts_when_guard_reserve_is_extra_safe(self) -> None:
+        strategy = SquadStrategy()
+        state = _state("S01", squad_available=9)
         strategy.on_start(state)
 
         self.assertEqual(
             [{"action": "SQUAD_SCOUT", "targetNodeId": "S04"}],
             strategy.decide(StrategyContext.from_state(state)),
         )
-        self.assertEqual(
-            [{"action": "SQUAD_SCOUT", "targetNodeId": "S05"}],
-            strategy.decide(StrategyContext.from_state(state)),
-        )
 
-    def test_squad_strategy_clears_future_obstacle_before_scouting(self) -> None:
+    def test_squad_strategy_preserves_guard_reserve_before_clearing_obstacle(self) -> None:
         strategy = SquadStrategy()
         state = _state(
             "S09",
@@ -136,15 +139,14 @@ class OptimizationStrategyTests(unittest.TestCase):
         )
         strategy.on_start(state)
 
-        self.assertEqual(
-            [{"action": "SQUAD_CLEAR", "targetNodeId": "S10"}],
-            strategy.decide(StrategyContext.from_state(state)),
-        )
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
 
-    def test_squad_strategy_weakens_future_enemy_guard_before_scouting(self) -> None:
+    def test_squad_strategy_weakens_route_edge_enemy_guard_before_scouting(self) -> None:
         strategy = SquadStrategy()
         state = _state(
             "S09",
+            player_state="MOVING",
+            next_node_id="S10",
             nodes=[
                 {
                     "nodeId": "S10",
@@ -159,6 +161,56 @@ class OptimizationStrategyTests(unittest.TestCase):
         self.assertEqual(
             [{"action": "SQUAD_WEAKEN", "targetNodeId": "S10"}],
             strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_squad_strategy_can_repeat_weaken_until_route_edge_guard_is_expected_clear(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S10",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 7, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(state)
+        context = StrategyContext.from_state(state)
+
+        for _ in range(4):
+            self.assertEqual(
+                [{"action": "SQUAD_WEAKEN", "targetNodeId": "S10"}],
+                strategy.decide(context),
+            )
+        self.assertEqual([], strategy.decide(context))
+
+    def test_pipeline_weakens_next_node_guard_while_resuming_route_edge_move(self) -> None:
+        state = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S10",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 7, "active": True},
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [
+                {"action": "MOVE", "targetNodeId": "S10"},
+                {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
+            ],
+            strategy.decide(state),
         )
 
     def test_pipeline_does_not_let_intel_preempt_delivery_move(self) -> None:
