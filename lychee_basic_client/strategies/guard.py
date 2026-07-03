@@ -41,29 +41,85 @@ class GuardStrategy:
         self._route_policy = route_policy
         self._attempted_nodes: set[str] = set()
         self._logger = get_logger("strategies.guard")
+        self._flow = get_logger("guard_flow")
 
     def on_start(self, state: Any) -> None:
         self._attempted_nodes.clear()
         return None
 
+    def _log_wuguan(self, state: GameState, current: str, reason: str, **detail: Any) -> None:
+        parts = " ".join(f"{k}={v}" for k, v in detail.items())
+        self._flow.important(
+            "wuguan_guard round=%s node=%s reason=%s %s | 武关设卡诊断：%s",
+            state.round_no, current, reason, parts, reason,
+        )
+
+    def _log_wuguan_opponents(self, state: GameState, current: str) -> None:
+        player = state.me
+        if player is None:
+            return
+        for other in state.players.values():
+            if other.player_id == player.player_id or other.team_id == player.team_id:
+                continue
+            other_node = other.current_node_id
+            if not other_node:
+                continue
+            target = state.game_map.terminal_node_ids[0] if other.verified else state.game_map.gate_node_id
+            path = state.game_map.fastest_path(other_node, target)
+            through_wuguan = WUGUAN_NODE_ID in path
+            eta = None
+            if through_wuguan:
+                path_to_wuguan = path[: path.index(WUGUAN_NODE_ID) + 1]
+                eta = estimate_path_rounds(state, path_to_wuguan, include_process=True)
+            self._flow.important(
+                "wuguan_guard_opponent round=%s node=%s opp_id=%s opp_node=%s verified=%s target=%s path=%s through_wuguan=%s eta=%s"
+                " | 武关设卡诊断：对手路径与ETA分析",
+                state.round_no, current, other.player_id, other_node, other.verified, target,
+                "->".join(path) if path else "N/A", through_wuguan, eta,
+            )
+
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
         state = context.state
         player = state.me
+        current = player.current_node_id if player else None
+        is_wuguan = current == WUGUAN_NODE_ID
+
         if player is None or player.delivered:
+            if is_wuguan:
+                self._log_wuguan(state, current, "player_none_or_delivered",
+                                 delivered=getattr(player, "delivered", None))
             return []
         if state.phase == "RUSH" or player.state != "IDLE" or player.current_process:
+            if is_wuguan:
+                self._log_wuguan(state, current, "not_idle_or_rush",
+                                 phase=state.phase, player_state=player.state,
+                                 current_process=player.current_process)
             return []
 
         current = player.current_node_id
         if not current or current in self._attempted_nodes:
+            if is_wuguan:
+                self._log_wuguan(state, current, "already_attempted",
+                                 in_attempted=current in self._attempted_nodes)
             return []
-        if _active_own_guard_count(state, player) >= MAX_ACTIVE_OWN_GUARDS:
+        active_count = _active_own_guard_count(state, player)
+        if active_count >= MAX_ACTIVE_OWN_GUARDS:
+            if is_wuguan:
+                self._log_wuguan(state, current, "max_guards_reached",
+                                 active_count=active_count, max_guards=MAX_ACTIVE_OWN_GUARDS)
             return []
 
         node = state.nodes.get(current)
         if node is None:
+            if is_wuguan:
+                self._log_wuguan(state, current, "node_not_in_state")
             return []
-        if _has_active_guard(node) or enemy_guard_at(node, player) is not None:
+        has_own = _has_active_guard(node)
+        has_enemy = enemy_guard_at(node, player) is not None
+        if has_own or has_enemy:
+            if is_wuguan:
+                self._log_wuguan(state, current, "already_guarded",
+                                 has_own=has_own, has_enemy=has_enemy)
             return []
 
         speed_guard = self._speed_priority_wuguan_guard(state, player, current)
@@ -72,22 +128,48 @@ class GuardStrategy:
             return [speed_guard]
 
         if player.task_score < TASK_SCORE_GOAL:
+            if is_wuguan:
+                self._log_wuguan(state, current, "task_score_below_goal",
+                                 task_score=player.task_score, goal=TASK_SCORE_GOAL)
             return []
         if state.round_no >= 420:
+            if is_wuguan:
+                self._log_wuguan(state, current, "round_too_late_normal",
+                                 round_no=state.round_no, limit=420)
             return []
 
         candidate_score = _guard_candidate_score(state, current)
         if candidate_score < MIN_GUARD_SCORE:
+            if is_wuguan:
+                self._log_wuguan(state, current, "candidate_score_too_low",
+                                 candidate_score=candidate_score, min=MIN_GUARD_SCORE)
             return []
         if _creates_large_bounty_risk(state, player):
+            if is_wuguan:
+                self._log_wuguan(state, current, "large_bounty_risk",
+                                 total_score=player.total_score)
             return []
         if not _delivery_has_guard_slack(state, player, current):
+            if is_wuguan:
+                delivery_total = state.round_no + estimate_delivery_rounds(
+                    state, current, player.verified) + 100
+                self._log_wuguan(state, current, "no_delivery_slack_normal",
+                                 round_no=state.round_no, delivery_total=delivery_total, limit=600)
             return []
         if not _opponent_will_need_node(state, player, current):
+            if is_wuguan:
+                self._log_wuguan(state, current, "opponent_not_need_node_normal")
+                self._log_wuguan_opponents(state, current)
             return []
 
         extra_good_fruit = _extra_good_fruit_for_guard(state, player, current, candidate_score)
-        if player.good_fruit <= _base_guard_cost(state, current) + extra_good_fruit + 18:
+        base_cost = _base_guard_cost(state, current)
+        threshold = base_cost + extra_good_fruit + 18
+        if player.good_fruit <= threshold:
+            if is_wuguan:
+                self._log_wuguan(state, current, "not_enough_good_fruit_normal",
+                                 good_fruit=player.good_fruit, threshold=threshold,
+                                 base_cost=base_cost, extra=extra_good_fruit)
             return []
 
         self._attempted_nodes.add(current)
@@ -107,21 +189,49 @@ class GuardStrategy:
         current: str,
     ) -> Optional[dict[str, Any]]:
         if not route_policy_is_speed_priority(self._route_policy):
+            if current == WUGUAN_NODE_ID:
+                self._log_wuguan(state, current, "not_speed_priority_profile")
             return None
         if current != WUGUAN_NODE_ID:
             return None
         if state.round_no >= 360:
+            self._log_wuguan(state, current, "round_too_late_speed",
+                             round_no=state.round_no, limit=360)
             return None
-        if not _delivery_has_guard_slack(state, player, current):
+        has_slack = _delivery_has_guard_slack(state, player, current)
+        if not has_slack:
+            delivery_total = state.round_no + estimate_delivery_rounds(
+                state, current, player.verified) + 100
+            self._log_wuguan(state, current, "no_delivery_slack_speed",
+                             round_no=state.round_no, delivery_total=delivery_total, limit=600,
+                             verified=player.verified)
             return None
-        if not _opponent_will_need_node(state, player, current):
+        opp_will_need = _opponent_will_need_node(state, player, current)
+        if not opp_will_need:
+            self._log_wuguan(state, current, "opponent_not_need_node_speed")
+            self._log_wuguan_opponents(state, current)
             return None
         opponent_eta = opponent_eta_to_wuguan(state, player)
         if opponent_eta is None or opponent_eta < WUGUAN_GUARD_MIN_OPPONENT_ETA:
+            self._log_wuguan(state, current, "opponent_eta_none_or_too_close",
+                             opponent_eta=opponent_eta,
+                             min_required=WUGUAN_GUARD_MIN_OPPONENT_ETA)
+            self._log_wuguan_opponents(state, current)
             return None
         extra_good_fruit = wuguan_guard_extra_good_fruit(state, player)
-        if player.good_fruit <= _base_guard_cost(state, current) + extra_good_fruit + 12:
+        base_cost = _base_guard_cost(state, current)
+        threshold = base_cost + extra_good_fruit + 12
+        if player.good_fruit <= threshold:
+            self._log_wuguan(state, current, "not_enough_good_fruit_speed",
+                             good_fruit=player.good_fruit, threshold=threshold,
+                             base_cost=base_cost, extra=extra_good_fruit,
+                             opponent_eta=opponent_eta)
             return None
+        self._flow.important(
+            "wuguan_guard_pass round=%s node=%s opponent_eta=%s extra_good=%s good=%s base_cost=%s"
+            " | 武关设卡诊断：所有条件通过，提交 SET_GUARD",
+            state.round_no, current, opponent_eta, extra_good_fruit, player.good_fruit, base_cost,
+        )
         self._logger.important(
             "set_guard_speed_priority round=%s node=%s opponent_eta=%s extra_good=%s good=%s"
             " | 速度优先：我方已先到武关，且对手到达武关仍有足够距离，立即设卡拖慢对方入关节奏",
