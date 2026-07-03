@@ -188,7 +188,7 @@ class OptimizationStrategyTests(unittest.TestCase):
             )
         self.assertEqual([], strategy.decide(context))
 
-    def test_pipeline_weakens_next_node_guard_while_resuming_route_edge_move(self) -> None:
+    def test_pipeline_weakens_next_node_guard_while_detouring_route_edge(self) -> None:
         state = _state(
             "S09",
             player_state="MOVING",
@@ -207,7 +207,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "MOVE", "targetNodeId": "S10"},
+                {"action": "MOVE", "targetNodeId": "S08"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(state),

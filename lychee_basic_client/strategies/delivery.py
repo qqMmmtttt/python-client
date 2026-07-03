@@ -106,6 +106,13 @@ class DeliveryStrategy:
         if profile_action:
             return [profile_action]
 
+        adjacent_guard_decision = self._adjacent_blocked_guard_decision_if_needed(
+            state,
+            current,
+        )
+        if adjacent_guard_decision is not None:
+            return [adjacent_guard_decision.action] if adjacent_guard_decision.action else []
+
         task_target = select_task_target(state, current, self._rejected_task_ids)
         if task_target is not None and task_target.stand_node_id == current:
             return [claim_task(task_target.task_id)]
@@ -126,9 +133,24 @@ class DeliveryStrategy:
         self, state: GameState, player: Any
     ) -> list[dict[str, Any]]:
         if player.next_node_id:
-            if player.next_node_id in self._guard_blocked_move_targets:
+            if self._route_edge_target_blocked_by_guard(state, player.next_node_id):
+                detour_target = self._route_edge_detour_target(
+                    state,
+                    player.current_node_id,
+                    player.next_node_id,
+                )
+                if detour_target:
+                    self._logger.important(
+                        "guard_blocked_route_edge_detour round=%s state=%s from=%s blocked=%s detour=%s",
+                        state.round_no,
+                        player.state,
+                        player.current_node_id,
+                        player.next_node_id,
+                        detour_target,
+                    )
+                    return [self._move(detour_target)]
                 self._logger.important(
-                    "guard_blocked_on_route_edge round=%s state=%s from=%s to=%s action=MOVE_ONLY",
+                    "guard_blocked_on_route_edge_no_detour round=%s state=%s from=%s to=%s action=MOVE_ONLY",
                     state.round_no,
                     player.state,
                     player.current_node_id,
@@ -186,6 +208,69 @@ class DeliveryStrategy:
 
         self._discard_blocked_target(target_node_id)
         return None
+
+    def _adjacent_blocked_guard_decision_if_needed(
+        self,
+        state: GameState,
+        current_node_id: str,
+    ) -> Optional["_BlockingDecision"]:
+        for target_node_id in sorted(self._guard_blocked_move_targets):
+            if target_node_id not in state.game_map.neighbors(current_node_id):
+                continue
+            decision = self._blocking_decision_if_needed(state, target_node_id)
+            if decision is None:
+                continue
+            self._logger.important(
+                "guard_blocked_adjacent_recovery round=%s current=%s target=%s action=%s",
+                state.round_no,
+                current_node_id,
+                target_node_id,
+                decision.action,
+            )
+            return decision
+        return None
+
+    def _route_edge_target_blocked_by_guard(
+        self,
+        state: GameState,
+        target_node_id: str,
+    ) -> bool:
+        if target_node_id in self._guard_blocked_move_targets:
+            return True
+        return enemy_guard_at(state.nodes.get(target_node_id), state.me) is not None
+
+    def _route_edge_detour_target(
+        self,
+        state: GameState,
+        origin_node_id: Optional[str],
+        blocked_target_node_id: str,
+    ) -> Optional[str]:
+        if not origin_node_id:
+            return None
+
+        candidates = [
+            node_id
+            for node_id in state.game_map.neighbors(origin_node_id)
+            if node_id != blocked_target_node_id
+            and _detour_candidate_is_safe(state, node_id)
+        ]
+        if not candidates:
+            return None
+
+        direct_staging = [
+            node_id
+            for node_id in candidates
+            if blocked_target_node_id in state.game_map.neighbors(node_id)
+        ]
+        if direct_staging:
+            return min(
+                direct_staging,
+                key=lambda node_id: _detour_score(state, origin_node_id, node_id),
+            )
+        return min(
+            candidates,
+            key=lambda node_id: _detour_score(state, origin_node_id, node_id),
+        )
 
     def _enemy_guard_action(
         self,
@@ -507,6 +592,31 @@ def _squad_in_flight(player: Any) -> int:
         return int(player.raw.get("squadInFlight") or 0)
     except (AttributeError, TypeError, ValueError):
         return 0
+
+
+def _detour_candidate_is_safe(state: GameState, node_id: str) -> bool:
+    node = state.nodes.get(node_id)
+    if node is None:
+        return True
+    if node.has_obstacle:
+        return False
+    return enemy_guard_at(node, state.me) is None
+
+
+def _detour_score(state: GameState, origin_node_id: str, candidate_node_id: str) -> tuple[int, int, str]:
+    gate = state.game_map.gate_node_id
+    return (
+        _edge_distance(state, origin_node_id, candidate_node_id),
+        state.game_map.route_distance(candidate_node_id, gate) or 1_000_000,
+        candidate_node_id,
+    )
+
+
+def _edge_distance(state: GameState, left: str, right: str) -> int:
+    for edge, neighbor in state.game_map.iter_neighbor_edges(left):
+        if neighbor == right:
+            return edge.distance
+    return 1_000_000
 
 
 def _break_order_cost(player: Any) -> tuple[int, int]:
