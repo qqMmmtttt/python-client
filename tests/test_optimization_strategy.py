@@ -93,6 +93,24 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual([], ResourceStrategy().decide(StrategyContext.from_state(state)))
 
+    def test_resource_strategy_does_not_use_horse_while_route_edge_guard_is_adjacent(self) -> None:
+        state = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S07",
+            resources={"FAST_HORSE": 1},
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual([], ResourceStrategy().decide(StrategyContext.from_state(state)))
+
     def test_pipeline_uses_intel_before_fixed_process(self) -> None:
         state = _state("S13", round_no=450, resources={"INTEL": 1})
         strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
@@ -188,6 +206,49 @@ class OptimizationStrategyTests(unittest.TestCase):
             )
         self.assertEqual([], strategy.decide(context))
 
+    def test_squad_strategy_keeps_weakening_adjacent_guard_after_route_edge_pivot(self) -> None:
+        strategy = SquadStrategy()
+        blocked = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S10",
+            squad_available=8,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(blocked)
+
+        self.assertEqual(
+            [{"action": "SQUAD_WEAKEN", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(blocked)),
+        )
+
+        pivot_edge = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S07",
+            squad_available=6,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "SQUAD_WEAKEN", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(pivot_edge)),
+        )
+
     def test_pipeline_weakens_next_node_guard_while_detouring_route_edge(self) -> None:
         state = _state(
             "S09",
@@ -211,6 +272,48 @@ class OptimizationStrategyTests(unittest.TestCase):
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(state),
+        )
+
+    def test_pipeline_holds_pivot_edge_while_squad_weakens_observed_guard(self) -> None:
+        state = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S10",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+        strategy.decide(state)
+
+        pivot_edge = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S07",
+            resources={"FAST_HORSE": 1},
+            squad_available=6,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [
+                {"action": "WAIT"},
+                {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
+            ],
+            strategy.decide(pivot_edge),
         )
 
     def test_pipeline_does_not_let_intel_preempt_delivery_move(self) -> None:

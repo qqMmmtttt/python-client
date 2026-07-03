@@ -126,8 +126,23 @@ def _weaken_target_on_route(
             player.next_node_id,
             guard.defense,
             pending_weaken_counts,
+            force_until_clear=True,
         ):
             return player.next_node_id
+
+    if player.state in ROUTE_EDGE_STATES and player.current_node_id:
+        for node_id in state.game_map.neighbors(player.current_node_id):
+            guard = enemy_guard_at(state.nodes.get(node_id), player)
+            if guard is None:
+                continue
+            if _should_dispatch_weaken(
+                context,
+                node_id,
+                guard.defense,
+                pending_weaken_counts,
+                force_until_clear=True,
+            ):
+                return node_id
 
     target = state.game_map.terminal_node_ids[0] if player.verified else state.game_map.gate_node_id
     path = _route_path(state, player.current_node_id, target, route_policy)
@@ -147,6 +162,8 @@ def _should_dispatch_weaken(
     target_node_id: str,
     defense: int,
     pending_weaken_counts: dict[str, int],
+    *,
+    force_until_clear: bool = False,
 ) -> bool:
     state = context.state
     player = state.me
@@ -155,7 +172,7 @@ def _should_dispatch_weaken(
         return False
 
     pending = pending_weaken_counts.get(target_node_id, 0)
-    if player.state in ROUTE_EDGE_STATES and player.next_node_id == target_node_id:
+    if force_until_clear:
         return defense - pending * SQUAD_WEAKEN_VALUE > 0
 
     if _direct_break_can_clear(player, defense):

@@ -13,6 +13,7 @@ from lychee_basic_client.protocol.actions import (
     move,
     process,
     verify_gate,
+    wait,
 )
 from lychee_basic_client.rules.blocking import enemy_guard_at
 from lychee_basic_client.rules.states import NODE_BUSY_STATES, ROUTE_EDGE_STATES
@@ -153,6 +154,17 @@ class DeliveryStrategy:
                     )
                     return [self._move(recovery_target)]
 
+                if player.next_node_id != recovery_target:
+                    self._logger.important(
+                        "guard_blocked_route_edge_hold round=%s state=%s from=%s blocked=%s current_next=%s action=WAIT",
+                        state.round_no,
+                        player.state,
+                        player.current_node_id,
+                        recovery_target,
+                        player.next_node_id,
+                    )
+                    return [wait()]
+
                 pivot_target = self._route_edge_reset_pivot_target(
                     state,
                     player.current_node_id,
@@ -282,6 +294,7 @@ class DeliveryStrategy:
     ) -> bool:
         node = state.nodes.get(target_node_id)
         if enemy_guard_at(node, state.me) is not None:
+            self._guard_blocked_move_targets.add(target_node_id)
             return True
         if node is not None and "guard" in node.raw:
             self._guard_blocked_move_targets.discard(target_node_id)

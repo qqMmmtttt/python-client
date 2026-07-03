@@ -487,7 +487,50 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S05"}],
+            [{"action": "WAIT"}],
+            strategy.decide(StrategyContext.from_state(pivot_edge)),
+        )
+
+    def test_delivery_remembers_observed_route_edge_guard_without_rejection(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(_state("S09"))
+
+        observed_guard = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S10",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S07"}],
+            strategy.decide(StrategyContext.from_state(observed_guard)),
+        )
+
+        pivot_edge = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S07",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 

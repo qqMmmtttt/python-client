@@ -3,6 +3,7 @@ from typing import Any, Optional
 from lychee_basic_client.planning.estimates import estimate_delivery_rounds
 from lychee_basic_client.planning.tasks import TASK_CUTOFF_ROUND, TASK_SCORE_GOAL
 from lychee_basic_client.protocol.actions import claim_resource, use_resource
+from lychee_basic_client.rules.blocking import enemy_guard_at
 from lychee_basic_client.rules.buffs import has_move_buff
 from lychee_basic_client.rules.states import NODE_BUSY_STATES, ROUTE_EDGE_STATES
 from lychee_basic_client.strategies.context import StrategyContext
@@ -58,6 +59,8 @@ class ResourceStrategy:
             return []
 
         if player.state in ROUTE_EDGE_STATES:
+            if _has_adjacent_route_edge_guard(state, player):
+                return []
             return _horse_action_if_useful(state, player)
 
         if player.state != "IDLE":
@@ -119,6 +122,15 @@ def _horse_action_if_useful(state: Any, player: Any) -> list[dict[str, Any]]:
         if player.resources.get(resource_type, 0) > 0:
             return [use_resource(resource_type)]
     return []
+
+
+def _has_adjacent_route_edge_guard(state: Any, player: Any) -> bool:
+    if not player.current_node_id:
+        return False
+    for node_id in state.game_map.neighbors(player.current_node_id):
+        if enemy_guard_at(state.nodes.get(node_id), player) is not None:
+            return True
+    return False
 
 
 def _has_active_t06(state: Any) -> bool:
