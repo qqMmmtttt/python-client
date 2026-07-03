@@ -30,6 +30,7 @@ class DeliveryStrategy:
     def __init__(self, route_policy: RoutePolicy) -> None:
         self._route_policy = route_policy
         self._logger = get_logger("strategies.delivery")
+        self._guard_logger = get_logger("guard_flow")
         self._completed_process_nodes: set[str] = set()
         self._pending_process_node: Optional[str] = None
         self._last_settled_node: Optional[str] = None
@@ -42,7 +43,10 @@ class DeliveryStrategy:
         self._obstacle_blocked_move_targets: set[str] = set()
         self._route_edge_resume_targets: set[str] = set()
         self._last_move_target: Optional[str] = None
-        self._route_edge_guard_reset = RouteEdgeGuardResetTracker(self._logger)
+        self._route_edge_guard_reset = RouteEdgeGuardResetTracker(
+            self._logger,
+            self._guard_logger,
+        )
 
     def on_start(self, state: GameState) -> None:
         self._completed_process_nodes.clear()
@@ -205,6 +209,19 @@ class DeliveryStrategy:
                             recovery_target,
                             staging_target,
                         )
+                        self._guard_logger.important(
+                            "round=%s 【设卡处理｜修正换道目标】\n"
+                            "  位置：%s\n"
+                            "  关卡：被阻挡节点=%s，当前换道朝向=%s，修正后的换道触发节点=%s\n"
+                            "  判断：当前朝向不是最佳复位 pivot；pivot 只是触发服务端回到起点，不是实际目的地\n"
+                            "  决策：本帧仅发送一次 MOVE %s；下一帧若仍处于起点到 pivot 的路线边，将强制 actions=[]",
+                            state.round_no,
+                            _player_position_summary(player),
+                            recovery_target,
+                            player.next_node_id,
+                            staging_target,
+                            staging_target,
+                        )
                         self._logger.important(
                             "guard_blocked_route_edge_restage round=%s state=%s from=%s blocked=%s current_next=%s staging=%s"
                             " | 路线边设卡复位：当前换道目标不是最佳复位 pivot，重新发送一次换道 MOVE；pivot 不是实际目的地",
@@ -253,6 +270,18 @@ class DeliveryStrategy:
                         recovery_target,
                         pivot_target,
                     )
+                    self._guard_logger.important(
+                        "round=%s 【设卡处理｜启动换道复位】\n"
+                        "  位置：%s\n"
+                        "  关卡：被阻挡节点=%s，%s\n"
+                        "  判断：当前在路线边，不能原路退回起点，也不能在路线边 BREAK_GUARD；需要用相邻节点触发换道复位\n"
+                        "  决策：本帧仅发送一次 MOVE %s；该节点不是实际目的地，下一帧必须提交 actions=[] 等服务端回到起点 IDLE",
+                        state.round_no,
+                        _player_position_summary(player),
+                        recovery_target,
+                        _guard_summary(state, recovery_target),
+                        pivot_target,
+                    )
                     self._logger.important(
                         "guard_blocked_route_edge_reset round=%s state=%s from=%s blocked=%s current_next=%s pivot=%s"
                         " | 路线边设卡复位：目标被设卡阻挡，发送一次换道 MOVE 触发服务端回到起点节点；pivot 不是实际目的地",
@@ -271,6 +300,17 @@ class DeliveryStrategy:
                     player.state,
                     player.current_node_id,
                     player.next_node_id,
+                )
+                self._guard_logger.important(
+                    "round=%s 【设卡处理｜无法换道复位】\n"
+                    "  位置：%s\n"
+                    "  关卡：被阻挡节点=%s，%s\n"
+                    "  判断：起点没有除被阻挡节点外的合法相邻节点，无法执行换道复位\n"
+                    "  决策：保持协议允许的当前目标 MOVE，等待服务端状态/公开节点变化",
+                    state.round_no,
+                    _player_position_summary(player),
+                    recovery_target,
+                    _guard_summary(state, recovery_target),
                 )
             return [self._move(player.next_node_id)]
         return []
@@ -413,10 +453,64 @@ class DeliveryStrategy:
         for target_node_id in sorted(self._guard_blocked_move_targets):
             if target_node_id in neighbors:
                 return target_node_id
+
+        visible_guard_target = self._visible_adjacent_guard_recovery_target(
+            state,
+            origin_node_id,
+            current_next_node_id,
+        )
+        if visible_guard_target:
+            return visible_guard_target
+
         for target_node_id in sorted(self._route_edge_resume_targets):
             if target_node_id in neighbors:
                 return target_node_id
         return None
+
+    def _visible_adjacent_guard_recovery_target(
+        self,
+        state: GameState,
+        origin_node_id: str,
+        current_next_node_id: Optional[str],
+    ) -> Optional[str]:
+        player = state.me
+        guarded_neighbors = [
+            node_id
+            for node_id in state.game_map.neighbors(origin_node_id)
+            if enemy_guard_at(state.nodes.get(node_id), player) is not None
+        ]
+        if not guarded_neighbors:
+            return None
+
+        delivery_target = (
+            state.game_map.terminal_node_ids[0]
+            if player and player.verified
+            else state.game_map.gate_node_id
+        )
+        target_node_id = min(
+            guarded_neighbors,
+            key=lambda node_id: (
+                _path_distance(state, node_id, delivery_target),
+                _edge_distance(state, origin_node_id, node_id),
+                node_id,
+            ),
+        )
+        guard = enemy_guard_at(state.nodes.get(target_node_id), player)
+        self._remember_guard_block(state, target_node_id)
+        self._guard_logger.important(
+            "round=%s 【设卡处理｜公开状态发现关卡】\n"
+            "  位置：%s\n"
+            "  关卡：目标节点=%s，防守方=%s，防守值=%s，当前朝向=%s\n"
+            "  判断：路线边复位状态或历史阻挡记录不足，但服务器公开状态显示起点相邻节点存在敌方设卡\n"
+            "  决策：将该节点记录为被阻挡目标，重新进入换道复位/节点攻坚流程，避免继续朝当前朝向前进",
+            state.round_no,
+            _player_position_summary(player),
+            target_node_id,
+            guard.owner_team_id if guard else None,
+            guard.defense if guard else None,
+            current_next_node_id,
+        )
+        return target_node_id
 
     def _route_edge_target_blocked_by_guard(
         self,
@@ -487,6 +581,21 @@ class DeliveryStrategy:
             payment is not None
             and _has_delivery_slack(state, target_node_id, margin=18)
         ):
+            self._guard_logger.important(
+                "round=%s 【设卡处理｜节点态直接攻坚】\n"
+                "  位置：%s\n"
+                "  关卡：目标节点=%s，防守值=%s，%s\n"
+                "  判断：当前车队位于相邻节点且 IDLE；果品投入可一次攻破，交付时间余量满足要求\n"
+                "  决策：提交 BREAK_GUARD %s，投入好果=%s，坏果=%s",
+                state.round_no,
+                _player_position_summary(player),
+                target_node_id,
+                defense,
+                _guard_summary(state, target_node_id),
+                target_node_id,
+                payment.get("good_fruit"),
+                payment.get("bad_fruit"),
+            )
             self._logger.important(
                 "guard_break round=%s target=%s defense=%s payment=%s mode=direct"
                 " | 攻坚破卡(直接)：果品组合攻坚值≥防守值且交付时间充裕(余量≥18帧)，可一击破卡（好果每篓+2，坏果每篓+3 攻坚值）",
@@ -501,6 +610,21 @@ class DeliveryStrategy:
             break_order_payment is not None
             and _has_delivery_slack(state, target_node_id, margin=18)
         ):
+            self._guard_logger.important(
+                "round=%s 【设卡处理｜节点态破关令攻坚】\n"
+                "  位置：%s\n"
+                "  关卡：目标节点=%s，防守值=%s，%s\n"
+                "  判断：普通果品不足以一次攻破，绑定破关令后攻坚值足够\n"
+                "  决策：提交 BREAK_GUARD %s + BREAK_ORDER，投入好果=%s，坏果=%s",
+                state.round_no,
+                _player_position_summary(player),
+                target_node_id,
+                defense,
+                _guard_summary(state, target_node_id),
+                target_node_id,
+                break_order_payment.get("good_fruit"),
+                break_order_payment.get("bad_fruit"),
+            )
             self._logger.important(
                 "guard_break round=%s target=%s defense=%s payment=%s mode=break_order"
                 " | 攻坚破卡(破关令)：直接攻坚果品不足，破关令补+3攻坚值后可一击破卡（终局急策额度消耗1次）",
@@ -517,6 +641,18 @@ class DeliveryStrategy:
                 )
             )
         if _should_hold_for_squad_weaken(state, defense):
+            self._guard_logger.important(
+                "round=%s 【设卡处理｜节点态等待小分队】\n"
+                "  位置：%s\n"
+                "  关卡：目标节点=%s，防守值=%s，%s\n"
+                "  判断：直接攻坚不足/不合算，且小分队可用或仍在途\n"
+                "  决策：本策略不提交主车队动作，等待小分队削弱结果",
+                state.round_no,
+                _player_position_summary(player),
+                target_node_id,
+                defense,
+                _guard_summary(state, target_node_id),
+            )
             self._logger.important(
                 "guard_hold_for_squad round=%s target=%s defense=%s squad_available=%s squad_in_flight=%s"
                 " | 暂不攻坚：直接/破关令攻坚均不可行，非冲刺阶段且小分队可用，等待小分队削弱设卡后再行突破",
@@ -529,6 +665,21 @@ class DeliveryStrategy:
             return _BlockingDecision(None)
         partial_payment = _partial_break_guard_payment(state)
         if partial_payment is not None:
+            self._guard_logger.important(
+                "round=%s 【设卡处理｜节点态部分攻坚】\n"
+                "  位置：%s\n"
+                "  关卡：目标节点=%s，防守值=%s，%s\n"
+                "  判断：无法一次攻破且没有小分队可等，但必须主动削弱关卡，不能等待风化\n"
+                "  决策：提交 BREAK_GUARD %s，投入好果=%s，坏果=%s；若未攻破将进入休整",
+                state.round_no,
+                _player_position_summary(player),
+                target_node_id,
+                defense,
+                _guard_summary(state, target_node_id),
+                target_node_id,
+                partial_payment.get("good_fruit"),
+                partial_payment.get("bad_fruit"),
+            )
             self._logger.important(
                 "guard_break round=%s target=%s defense=%s payment=%s mode=partial"
                 " | 攻坚破卡(部分削弱)：无法一击破卡且无小分队可用，投入部分果品削弱设卡防守值（攻坚失败将休整5帧）",
@@ -544,6 +695,19 @@ class DeliveryStrategy:
             state.round_no,
             target_node_id,
             defense,
+        )
+        self._guard_logger.important(
+            "round=%s 【设卡处理｜节点态强制通行】\n"
+            "  位置：%s\n"
+            "  关卡：目标节点=%s，防守值=%s，%s\n"
+            "  判断：无可用果品攻坚且无小分队可用\n"
+            "  决策：提交 FORCED_PASS %s，优先保证继续向终点推进",
+            state.round_no,
+            _player_position_summary(player),
+            target_node_id,
+            defense,
+            _guard_summary(state, target_node_id),
+            target_node_id,
         )
         return _BlockingDecision(forced_pass(target_node_id))
 
@@ -881,6 +1045,31 @@ def _should_hold_for_squad_weaken(state: GameState, defense: int) -> bool:
     if player.squad_available >= 2:
         return True
     return _squad_in_flight(player) > 0
+
+
+def _player_position_summary(player: Any) -> str:
+    if player is None:
+        return "未知位置：当前玩家状态缺失"
+    raw = getattr(player, "raw", {}) or {}
+    return (
+        f"状态={player.state}，当前节点/路线起点={player.current_node_id}，"
+        f"当前朝向={player.next_node_id}，路线边={raw.get('routeEdgeId')}，"
+        f"移动方向={raw.get('moveDirection')}，进度={raw.get('edgeProgressMs')}/{raw.get('edgeTotalMs')}，"
+        f"好果={player.good_fruit}，坏果={player.bad_fruit}，"
+        f"小分队可用={player.squad_available}，小分队在途={_squad_in_flight(player)}"
+    )
+
+
+def _guard_summary(state: GameState, target_node_id: str) -> str:
+    node = state.nodes.get(target_node_id)
+    guard = node.guard if node else None
+    if not guard:
+        return "公开关卡状态=未知/不存在"
+    return (
+        f"防守方={guard.get('ownerTeamId') or guard.get('teamId')}，"
+        f"防守值={guard.get('defense')}，active={guard.get('active')}，"
+        f"完成帧={guard.get('completeRound')}，年龄={guard.get('ageRound')}"
+    )
 
 
 def _squad_in_flight(player: Any) -> int:

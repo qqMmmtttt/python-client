@@ -1,14 +1,25 @@
 import json
+import logging
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Optional
 
 from lychee_basic_client.config import Config
 from lychee_basic_client.models.state import GameState
+from lychee_basic_client.observability.logging_setup import setup_logging
 from lychee_basic_client.strategies.factory import build_strategy
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.resources import ResourceStrategy
 from lychee_basic_client.strategies.squad import SquadStrategy
+
+
+def _close_package_handlers() -> None:
+    logger = logging.getLogger("lychee_basic_client")
+    for handler in list(logger.handlers):
+        handler.flush()
+        handler.close()
+    logger.handlers.clear()
 
 
 def _state(
@@ -351,6 +362,132 @@ class OptimizationStrategyTests(unittest.TestCase):
         )
 
         self.assertEqual([], strategy.decide(pivot_edge))
+
+    def test_pipeline_guard_reset_end_to_end_breaks_from_origin_after_empty_action(self) -> None:
+        guard_node = {
+            "nodeId": "S10",
+            "hasObstacle": False,
+            "resourceStock": {},
+            "guard": {"ownerTeamId": "BLUE", "defense": 4, "active": True},
+        }
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        blocked_edge = _state(
+            "S09",
+            round_no=296,
+            player_state="MOVING",
+            next_node_id="S10",
+            resources={"FAST_HORSE": 1},
+            squad_available=6,
+            nodes=[guard_node],
+        )
+        strategy.on_start(blocked_edge)
+
+        self.assertEqual(
+            [
+                {"action": "MOVE", "targetNodeId": "S08"},
+                {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
+            ],
+            strategy.decide(blocked_edge),
+        )
+
+        reset_edge = _state(
+            "S09",
+            round_no=297,
+            player_state="MOVING",
+            next_node_id="S08",
+            resources={"FAST_HORSE": 1},
+            squad_available=6,
+            nodes=[guard_node],
+        )
+        self.assertEqual([], strategy.decide(reset_edge))
+
+        origin_idle = _state(
+            "S09",
+            round_no=298,
+            player_state="IDLE",
+            squad_available=0,
+            nodes=[guard_node],
+        )
+        self.assertEqual(
+            [{"action": "BREAK_GUARD", "targetNodeId": "S10", "goodFruit": 2, "badFruit": 0}],
+            strategy.decide(origin_idle),
+        )
+
+    def test_pipeline_inferrs_visible_guard_and_does_not_continue_to_stale_s07_pivot(self) -> None:
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        stale_pivot_edge = _state(
+            "S09",
+            round_no=301,
+            player_state="MOVING",
+            next_node_id="S07",
+            resources={"FAST_HORSE": 1},
+            squad_available=6,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(stale_pivot_edge)
+
+        self.assertEqual(
+            [
+                {"action": "MOVE", "targetNodeId": "S08"},
+                {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
+            ],
+            strategy.decide(stale_pivot_edge),
+        )
+
+    def test_guard_log_records_route_edge_reset_end_to_end_in_chinese(self) -> None:
+        guard_node = {
+            "nodeId": "S10",
+            "hasObstacle": False,
+            "resourceStock": {},
+            "guard": {"ownerTeamId": "BLUE", "defense": 4, "active": True},
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            setup_logging(tmp_dir, "ERROR")
+            strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+            blocked_edge = _state(
+                "S09",
+                round_no=296,
+                player_state="MOVING",
+                next_node_id="S10",
+                squad_available=6,
+                nodes=[guard_node],
+            )
+            strategy.on_start(blocked_edge)
+            strategy.decide(blocked_edge)
+            strategy.decide(
+                _state(
+                    "S09",
+                    round_no=297,
+                    player_state="MOVING",
+                    next_node_id="S08",
+                    squad_available=6,
+                    nodes=[guard_node],
+                )
+            )
+            strategy.decide(
+                _state(
+                    "S09",
+                    round_no=298,
+                    player_state="IDLE",
+                    squad_available=0,
+                    nodes=[guard_node],
+                )
+            )
+            _close_package_handlers()
+
+            guard_log = (Path(tmp_dir) / "guard.log").read_text(encoding="utf-8")
+            self.assertIn("【设卡处理｜启动换道复位】", guard_log)
+            self.assertIn("【设卡处理｜换道复位空动作】", guard_log)
+            self.assertIn("【设卡处理｜节点态直接攻坚】", guard_log)
+            self.assertIn("决策：本帧强制提交 actions=[]", guard_log)
+            self.assertNotIn("每帧决策摘要", guard_log)
 
     def test_pipeline_does_not_let_intel_preempt_delivery_move(self) -> None:
         state = _state(

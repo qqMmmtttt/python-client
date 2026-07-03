@@ -23,6 +23,8 @@ class LoggingSetupTests(unittest.TestCase):
             logger.trace("raw wire")
             logger.info("debugging details")
             logger.important("match started")
+            guard_logger = get_logger("guard_flow")
+            guard_logger.important("设卡处理专用日志")
             logger.warning("odd but recoverable")
             logger.error("boom")
             _close_package_handlers()
@@ -30,6 +32,7 @@ class LoggingSetupTests(unittest.TestCase):
             trace_log = Path(tmp_dir) / "trace.log"
             info_log = Path(tmp_dir) / "info.log"
             important_log = Path(tmp_dir) / "important.log"
+            guard_log = Path(tmp_dir) / "guard.log"
             error_log = Path(tmp_dir) / "error.log"
 
             self.assertIn("raw wire", trace_log.read_text(encoding="utf-8"))
@@ -37,6 +40,9 @@ class LoggingSetupTests(unittest.TestCase):
             self.assertIn("debugging details", info_log.read_text(encoding="utf-8"))
             self.assertIn("odd but recoverable", info_log.read_text(encoding="utf-8"))
             self.assertIn("match started", important_log.read_text(encoding="utf-8"))
+            self.assertIn("设卡处理专用日志", important_log.read_text(encoding="utf-8"))
+            self.assertIn("设卡处理专用日志", guard_log.read_text(encoding="utf-8"))
+            self.assertNotIn("match started", guard_log.read_text(encoding="utf-8"))
             self.assertIn("boom", error_log.read_text(encoding="utf-8"))
 
 

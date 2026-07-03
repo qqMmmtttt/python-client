@@ -26,6 +26,15 @@ class _LevelRangeFilter(logging.Filter):
         return self._low <= record.levelno <= self._high
 
 
+class _LoggerNameFilter(logging.Filter):
+    def __init__(self, logger_name: str) -> None:
+        super().__init__()
+        self._logger_name = logger_name
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.name == self._logger_name
+
+
 def _important(self: logging.Logger, message: str, *args: Any, **kwargs: Any) -> None:
     if self.isEnabledFor(IMPORTANT_LEVEL):
         self._log(IMPORTANT_LEVEL, message, args, **kwargs)
@@ -81,6 +90,12 @@ def setup_logging(log_dir: str, level_name: str = "INFO") -> logging.Logger:
     important_handler.addFilter(_ExactLevelFilter(IMPORTANT_LEVEL))
     important_handler.setFormatter(formatter)
 
+    guard_handler = logging.FileHandler(log_path / "guard.log", encoding="utf-8")
+    guard_handler.setLevel(IMPORTANT_LEVEL)
+    guard_handler.addFilter(_ExactLevelFilter(IMPORTANT_LEVEL))
+    guard_handler.addFilter(_LoggerNameFilter(f"{PACKAGE_LOGGER_NAME}.guard_flow"))
+    guard_handler.setFormatter(formatter)
+
     error_handler = logging.FileHandler(log_path / "error.log", encoding="utf-8")
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(formatter)
@@ -92,6 +107,7 @@ def setup_logging(log_dir: str, level_name: str = "INFO") -> logging.Logger:
     logger.addHandler(trace_handler)
     logger.addHandler(info_handler)
     logger.addHandler(important_handler)
+    logger.addHandler(guard_handler)
     logger.addHandler(error_handler)
     logger.addHandler(console_handler)
     return logger
