@@ -16,7 +16,7 @@ class RouteEdgeGuardReset:
 
 
 class RouteEdgeGuardResetTracker:
-    """Tracks one route-edge lane change used only to reset back to the origin node."""
+    """Tracks the previous route-edge lane-change workaround for guard handling."""
 
     def __init__(self, logger: Any, guard_logger: Any) -> None:
         self._logger = logger
@@ -70,17 +70,20 @@ class RouteEdgeGuardResetTracker:
         ):
             reset.empty_rounds += 1
             message = (
-                "【设卡处理｜换道复位空动作】\n"
+                "【设卡处理｜换道后空动作风险】\n"
                 f"  位置：状态={player.state}，路线起点={reset.origin_node_id}，当前朝向={player.next_node_id}，"
                 f"路线边={_raw_value(player, 'routeEdgeId')}，移动方向={_raw_value(player, 'moveDirection')}，"
                 f"进度={_raw_value(player, 'edgeProgressMs')}/{_raw_value(player, 'edgeTotalMs')}\n"
                 f"  关卡：被阻挡节点={reset.blocked_node_id}，换道触发节点={reset.pivot_node_id}\n"
-                "  判断：已经发送过一次换道 MOVE，pivot 只用于触发服务端回到起点，不是实际目的地\n"
-                "  决策：本帧强制提交 actions=[]，严禁 WAIT，严禁继续 MOVE 到换道触发节点"
+                f"  上帧结果：{_action_results_summary(state)}\n"
+                f"  关键事件：{_events_summary(state)}\n"
+                "  协议核对：actions=[] 只是空动作心跳；路线边上会按服务端当前移动继续推进，不会回到起点 IDLE\n"
+                "  判断：当前复位假设与任务书/通信协议不一致；如果继续提交空动作，车队会继续朝换道触发节点前进\n"
+                "  决策：当前代码仍会提交 actions=[]，本日志用于暴露根因；后续策略必须改为官方允许的等待、真实改道或强制通行流程"
             )
             self._logger.important(
                 "guard_route_edge_reset_empty round=%s state=%s origin=%s blocked=%s pivot=%s empty_rounds=%s"
-                " | 路线边设卡复位：已发送换道 MOVE，本帧强制提交空动作，让服务端结算回起点 IDLE，禁止继续朝 pivot 前进",
+                " | 路线边设卡复位风险：空动作不会让服务端回到起点 IDLE，协议规定移动状态会继续推进",
                 state.round_no,
                 player.state,
                 reset.origin_node_id,
@@ -153,3 +156,42 @@ def _raw_value(player: Any, key: str) -> Any:
         return player.raw.get(key)
     except AttributeError:
         return None
+
+
+def _action_results_summary(state: GameState) -> str:
+    results = getattr(state, "action_results", None) or []
+    if not results:
+        return "无"
+    parts: list[str] = []
+    for result in results[-4:]:
+        payload = _mapping_value(result, "payload") or result
+        action = _mapping_value(payload, "action")
+        accepted = _mapping_value(payload, "accepted")
+        outcome = _mapping_value(payload, "result")
+        error_code = _mapping_value(payload, "errorCode")
+        target = _mapping_value(payload, "targetNodeId") or _mapping_value(payload, "nodeId")
+        parts.append(
+            f"{action}(accepted={accepted}, result={outcome}, error={error_code}, target={target})"
+        )
+    return "；".join(parts)
+
+
+def _events_summary(state: GameState) -> str:
+    events = getattr(state, "events", None) or []
+    if not events:
+        return "无"
+    parts: list[str] = []
+    for event in events[-5:]:
+        event_type = _mapping_value(event, "type")
+        payload = _mapping_value(event, "payload") or {}
+        target = _mapping_value(payload, "targetNodeId")
+        node = _mapping_value(payload, "nodeId")
+        error = _mapping_value(payload, "errorCode")
+        parts.append(f"{event_type}(node={node}, target={target}, error={error})")
+    return "；".join(parts)
+
+
+def _mapping_value(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(key)
+    return None

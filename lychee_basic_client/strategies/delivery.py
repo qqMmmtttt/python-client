@@ -12,6 +12,7 @@ from lychee_basic_client.protocol.actions import (
     claim_task,
     move,
     process,
+    wait,
     verify_gate,
 )
 from lychee_basic_client.rules.blocking import enemy_guard_at
@@ -20,6 +21,12 @@ from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.strategies.route_edge_recovery import (
     RouteEdgeGuardResetTracker,
+)
+from lychee_basic_client.strategies.route_edge_guard import (
+    ROUTE_EDGE_GUARD_MODE_SQUAD_HOLD,
+    ROUTE_EDGE_GUARD_RECOVERY_MODE,
+    ROUTE_EDGE_GUARD_RESUME_MOVE,
+    plan_route_edge_guard_recovery,
 )
 from lychee_basic_client.strategies.routing import RoutePolicy
 
@@ -176,6 +183,11 @@ class DeliveryStrategy:
                 player.next_node_id,
             )
             if recovery_target:
+                if ROUTE_EDGE_GUARD_RECOVERY_MODE == ROUTE_EDGE_GUARD_MODE_SQUAD_HOLD:
+                    return self._route_edge_guard_squad_hold_decision(
+                        state, player, recovery_target
+                    )
+
                 reset_action = self._route_edge_guard_reset.force_empty_if_needed(
                     state, player, recovery_target
                 )
@@ -213,8 +225,8 @@ class DeliveryStrategy:
                             "round=%s 【设卡处理｜修正换道目标】\n"
                             "  位置：%s\n"
                             "  关卡：被阻挡节点=%s，当前换道朝向=%s，修正后的换道触发节点=%s\n"
-                            "  判断：当前朝向不是最佳复位 pivot；pivot 只是触发服务端回到起点，不是实际目的地\n"
-                            "  决策：本帧仅发送一次 MOVE %s；下一帧若仍处于起点到 pivot 的路线边，将强制 actions=[]",
+                            "  判断：当前朝向不是最佳换道候选；按任务书，路线边改道会放弃旧路线进度并进入新路线，不会自动回到起点 IDLE\n"
+                            "  决策：本帧仅发送一次 MOVE %s；下一帧会记录服务端真实状态，禁止再把空动作误判为复位完成",
                             state.round_no,
                             _player_position_summary(player),
                             recovery_target,
@@ -274,8 +286,8 @@ class DeliveryStrategy:
                         "round=%s 【设卡处理｜启动换道复位】\n"
                         "  位置：%s\n"
                         "  关卡：被阻挡节点=%s，%s\n"
-                        "  判断：当前在路线边，不能原路退回起点，也不能在路线边 BREAK_GUARD；需要用相邻节点触发换道复位\n"
-                        "  决策：本帧仅发送一次 MOVE %s；该节点不是实际目的地，下一帧必须提交 actions=[] 等服务端回到起点 IDLE",
+                        "  判断：当前在路线边，不能原路退回起点，也不能在路线边 BREAK_GUARD；按任务书，MOVE 到起点其他相邻节点属于改道，会放弃旧进度并进入新路线\n"
+                        "  决策：本帧仅发送一次 MOVE %s；该动作不会保证回到起点 IDLE，后续必须根据服务端回传状态重新判断，严禁把 actions=[] 当复位动作",
                         state.round_no,
                         _player_position_summary(player),
                         recovery_target,
@@ -284,7 +296,7 @@ class DeliveryStrategy:
                     )
                     self._logger.important(
                         "guard_blocked_route_edge_reset round=%s state=%s from=%s blocked=%s current_next=%s pivot=%s"
-                        " | 路线边设卡复位：目标被设卡阻挡，发送一次换道 MOVE 触发服务端回到起点节点；pivot 不是实际目的地",
+                        " | 路线边设卡处理：目标被设卡阻挡，发送一次改道 MOVE；按协议该动作会进入新路线，不保证回到起点 IDLE",
                         state.round_no,
                         player.state,
                         player.current_node_id,
@@ -314,6 +326,71 @@ class DeliveryStrategy:
                 )
             return [self._move(player.next_node_id)]
         return []
+
+    def _route_edge_guard_squad_hold_decision(
+        self,
+        state: GameState,
+        player: Any,
+        recovery_target: str,
+    ) -> list[dict[str, Any]]:
+        blocked_by_guard = self._route_edge_target_blocked_by_guard(
+            state, recovery_target
+        )
+        plan = plan_route_edge_guard_recovery(
+            recovery_target,
+            blocked_by_guard=blocked_by_guard,
+        )
+        if plan.kind == ROUTE_EDGE_GUARD_RESUME_MOVE:
+            self._discard_blocked_target(recovery_target)
+            self._logger.important(
+                "guard_cleared_route_edge_resume round=%s state=%s from=%s current_next=%s target=%s"
+                " | 路线边设卡处理：目标设卡已清除，恢复前往目标节点",
+                state.round_no,
+                player.state,
+                player.current_node_id,
+                player.next_node_id,
+                recovery_target,
+            )
+            self._guard_logger.important(
+                "round=%s 【设卡处理｜途中关卡已清除】\n"
+                "  位置：%s\n"
+                "  关卡：目标节点=%s，公开状态已无敌方有效设卡\n"
+                "  决策：提交 MOVE %s，恢复向原目标节点前进",
+                state.round_no,
+                _player_position_summary(player),
+                recovery_target,
+                recovery_target,
+            )
+            return [self._move(recovery_target)]
+
+        self._guard_logger.important(
+            "round=%s 【设卡处理｜途中小分队削弱】\n"
+            "  位置：%s\n"
+            "  关卡：目标节点=%s，%s\n"
+            "  小分队：available=%s，inFlight=%s，判断=%s\n"
+            "  限制：当前主车队处于路线边，不能提交 BREAK_GUARD / FORCED_PASS / CLEAR；本策略不再使用换道复位\n"
+            "  决策：主车队提交 WAIT 悬停在当前路线边；由小分队策略提交 SQUAD_WEAKEN，关卡清除后再 MOVE %s",
+            state.round_no,
+            _player_position_summary(player),
+            recovery_target,
+            _guard_summary(state, recovery_target),
+            player.squad_available,
+            _squad_in_flight(player),
+            _route_edge_squad_status(player),
+            recovery_target,
+        )
+        self._logger.important(
+            "guard_blocked_route_edge_squad_hold round=%s state=%s from=%s blocked=%s current_next=%s squad_available=%s squad_in_flight=%s action=WAIT"
+            " | 路线边目标被敌方设卡阻挡：不换道，主车队 WAIT 悬停，等待小分队 SQUAD_WEAKEN 削弱/清除后恢复移动",
+            state.round_no,
+            player.state,
+            player.current_node_id,
+            recovery_target,
+            player.next_node_id,
+            player.squad_available,
+            _squad_in_flight(player),
+        )
+        return [wait()]
 
     def _move(self, target_node_id: str) -> dict[str, Any]:
         self._last_move_target = target_node_id
@@ -502,7 +579,7 @@ class DeliveryStrategy:
             "  位置：%s\n"
             "  关卡：目标节点=%s，防守方=%s，防守值=%s，当前朝向=%s\n"
             "  判断：路线边复位状态或历史阻挡记录不足，但服务器公开状态显示起点相邻节点存在敌方设卡\n"
-            "  决策：将该节点记录为被阻挡目标，重新进入换道复位/节点攻坚流程，避免继续朝当前朝向前进",
+            "  决策：将该节点记录为被阻挡目标，进入途中小分队削弱或节点态攻坚流程，避免继续朝错误朝向前进",
             state.round_no,
             _player_position_summary(player),
             target_node_id,
@@ -1079,6 +1156,14 @@ def _squad_in_flight(player: Any) -> int:
         return int(player.raw.get("squadInFlight") or 0)
     except (AttributeError, TypeError, ValueError):
         return 0
+
+
+def _route_edge_squad_status(player: Any) -> str:
+    if getattr(player, "squad_available", 0) >= 2:
+        return "可立即派出或继续派出 SQUAD_WEAKEN"
+    if _squad_in_flight(player) > 0:
+        return "已有小分队在途，等待服务器事件确认削弱结果"
+    return "无可用小分队且无在途小分队，需要检查人手保留策略"
 
 
 def _pivot_score(

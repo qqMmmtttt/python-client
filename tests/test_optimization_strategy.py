@@ -260,7 +260,7 @@ class OptimizationStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
-    def test_pipeline_weakens_next_node_guard_while_detouring_route_edge(self) -> None:
+    def test_pipeline_weakens_next_node_guard_while_holding_route_edge(self) -> None:
         state = _state(
             "S09",
             player_state="MOVING",
@@ -279,13 +279,13 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "MOVE", "targetNodeId": "S08"},
+                {"action": "WAIT"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(state),
         )
 
-    def test_pipeline_restages_wrong_pivot_edge_while_squad_weakens_observed_guard(self) -> None:
+    def test_pipeline_holds_wrong_pivot_edge_while_squad_weakens_observed_guard(self) -> None:
         state = _state(
             "S09",
             player_state="MOVING",
@@ -321,13 +321,13 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "MOVE", "targetNodeId": "S08"},
+                {"action": "WAIT"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(pivot_edge),
         )
 
-    def test_pipeline_forces_empty_after_route_edge_reset_pivot(self) -> None:
+    def test_pipeline_holds_after_legacy_route_edge_pivot(self) -> None:
         state = _state(
             "S09",
             player_state="MOVING",
@@ -361,9 +361,15 @@ class OptimizationStrategyTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual([], strategy.decide(pivot_edge))
+        self.assertEqual(
+            [
+                {"action": "WAIT"},
+                {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
+            ],
+            strategy.decide(pivot_edge),
+        )
 
-    def test_pipeline_guard_reset_end_to_end_breaks_from_origin_after_empty_action(self) -> None:
+    def test_pipeline_can_break_guard_if_server_reports_origin_idle(self) -> None:
         guard_node = {
             "nodeId": "S10",
             "hasObstacle": False,
@@ -384,7 +390,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "MOVE", "targetNodeId": "S08"},
+                {"action": "WAIT"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(blocked_edge),
@@ -399,7 +405,13 @@ class OptimizationStrategyTests(unittest.TestCase):
             squad_available=6,
             nodes=[guard_node],
         )
-        self.assertEqual([], strategy.decide(reset_edge))
+        self.assertEqual(
+            [
+                {"action": "WAIT"},
+                {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
+            ],
+            strategy.decide(reset_edge),
+        )
 
         origin_idle = _state(
             "S09",
@@ -435,13 +447,13 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "MOVE", "targetNodeId": "S08"},
+                {"action": "WAIT"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(stale_pivot_edge),
         )
 
-    def test_guard_log_records_route_edge_reset_end_to_end_in_chinese(self) -> None:
+    def test_guard_log_records_route_edge_squad_hold_end_to_end_in_chinese(self) -> None:
         guard_node = {
             "nodeId": "S10",
             "hasObstacle": False,
@@ -483,10 +495,11 @@ class OptimizationStrategyTests(unittest.TestCase):
             _close_package_handlers()
 
             guard_log = (Path(tmp_dir) / "guard.log").read_text(encoding="utf-8")
-            self.assertIn("【设卡处理｜启动换道复位】", guard_log)
-            self.assertIn("【设卡处理｜换道复位空动作】", guard_log)
+            self.assertIn("【设卡处理｜途中小分队削弱】", guard_log)
             self.assertIn("【设卡处理｜节点态直接攻坚】", guard_log)
-            self.assertIn("决策：本帧强制提交 actions=[]", guard_log)
+            self.assertIn("主车队提交 WAIT 悬停", guard_log)
+            self.assertIn("本策略不再使用换道复位", guard_log)
+            self.assertNotIn("【设卡处理｜启动换道复位】", guard_log)
             self.assertNotIn("每帧决策摘要", guard_log)
 
     def test_pipeline_does_not_let_intel_preempt_delivery_move(self) -> None:

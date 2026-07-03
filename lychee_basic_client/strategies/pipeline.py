@@ -12,6 +12,7 @@ class StrategyPipeline:
     def __init__(self, strategies: list[Strategy]) -> None:
         self._strategies = strategies
         self._logger = get_logger("strategies.pipeline")
+        self._guard_logger = get_logger("guard_flow")
 
     def on_start(self, state: GameState) -> None:
         for strategy in self._strategies:
@@ -37,6 +38,16 @@ class StrategyPipeline:
                         strategy_name,
                         action,
                     )
+                    if action.get("reason") == "ROUTE_EDGE_GUARD_RESET":
+                        self._guard_logger.important(
+                            "round=%s 【设卡处理｜Pipeline最终发包】\n"
+                            "  控制动作：%s\n"
+                            "  最终动作：actions=[]\n"
+                            "  协议核对：空动作是心跳；路线边 MOVING/WAITING 状态会继续按服务端状态推进，不会回到起点 IDLE\n"
+                            "  排查提示：如果下一帧仍显示朝换道节点移动且进度增加，说明不是发包丢失，而是该复位策略不符合协议语义",
+                            state.round_no,
+                            action,
+                        )
                     return []
                 categories = _action_categories(action)
                 priority = _action_priority(action)
@@ -168,6 +179,8 @@ def _action_priority(action: dict[str, Any]) -> int:
         return 120
     if action_type in {"FORCED_PASS", "CLEAR", "BREAK_GUARD"}:
         return 115
+    if action_type == "WAIT":
+        return 112
     if action_type == "PROCESS":
         return 105
     if action_type == "CLAIM_TASK":

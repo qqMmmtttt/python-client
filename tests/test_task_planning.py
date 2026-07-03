@@ -335,7 +335,7 @@ class TaskPlanningTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(state)),
         )
 
-    def test_delivery_detours_on_route_edge_after_move_is_blocked_without_target_payload(self) -> None:
+    def test_delivery_holds_on_route_edge_after_move_is_blocked_without_target_payload(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -381,11 +381,11 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(blocked)),
         )
 
-    def test_delivery_detours_after_server_wait_rejected_by_guard_on_route_edge(self) -> None:
+    def test_delivery_holds_after_server_wait_rejected_by_guard_on_route_edge(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -421,11 +421,11 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(blocked)),
         )
 
-    def test_delivery_detours_on_route_edge_when_guard_is_too_strong_to_break(self) -> None:
+    def test_delivery_holds_on_route_edge_when_guard_is_too_strong_to_break(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -457,7 +457,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(blocked)),
         )
 
@@ -512,7 +512,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
@@ -536,7 +536,7 @@ class TaskPlanningTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(observed_guard)),
         )
 
@@ -556,11 +556,11 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
-    def test_delivery_forces_empty_after_route_edge_reset_pivot(self) -> None:
+    def test_delivery_holds_on_stale_route_edge_pivot_with_squad_in_flight(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -601,11 +601,11 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [_route_edge_reset_empty_action("S09", "S10", "S08")],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
-    def test_delivery_never_continues_toward_reset_pivot_without_squad(self) -> None:
+    def test_delivery_holds_on_stale_route_edge_pivot_without_squad(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -646,7 +646,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [_route_edge_reset_empty_action("S09", "S10", "S08")],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
