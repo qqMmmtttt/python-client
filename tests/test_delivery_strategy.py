@@ -20,6 +20,7 @@ def _state(
     bad_fruit: int = 0,
     freshness: float = 90,
     break_order_ready: bool = False,
+    rush_tactic_used_count: int = 0,
     tasks: Optional[list[dict[str, Any]]] = None,
     nodes: Optional[list[dict[str, Any]]] = None,
     events: Optional[list[dict[str, Any]]] = None,
@@ -44,6 +45,7 @@ def _state(
                     "badFruit": bad_fruit,
                     "freshness": freshness,
                     "breakOrderReady": break_order_ready,
+                    "rushTacticUsedCount": rush_tactic_used_count,
                 }
             ],
             "tasks": tasks or [],
@@ -308,6 +310,81 @@ class DeliveryStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [{"action": "VERIFY_GATE", "targetNodeId": "S14", "rushTactic": "BREAK_ORDER"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_breaks_enemy_guard_with_break_order_when_it_changes_outcome(self) -> None:
+        strategy = self._strategy()
+        state = _state(
+            "S10",
+            phase="RUSH",
+            break_order_ready=True,
+            nodes=[
+                {
+                    "nodeId": "S11",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 7, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [
+                {
+                    "action": "BREAK_GUARD",
+                    "targetNodeId": "S11",
+                    "goodFruit": 2,
+                    "badFruit": 0,
+                    "rushTactic": "BREAK_ORDER",
+                }
+            ],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_breaks_enemy_guard_without_break_order_when_normal_payment_suffices(self) -> None:
+        strategy = self._strategy()
+        state = _state(
+            "S10",
+            phase="RUSH",
+            break_order_ready=True,
+            nodes=[
+                {
+                    "nodeId": "S11",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 4, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "BREAK_GUARD", "targetNodeId": "S11", "goodFruit": 2, "badFruit": 0}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_break_order_is_not_bound_to_guard_after_rush_tactic_was_used(self) -> None:
+        strategy = self._strategy()
+        state = _state(
+            "S10",
+            phase="RUSH",
+            break_order_ready=True,
+            rush_tactic_used_count=1,
+            nodes=[
+                {
+                    "nodeId": "S11",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 7, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "FORCED_PASS", "targetNodeId": "S11"}],
             strategy.decide(StrategyContext.from_state(state)),
         )
 

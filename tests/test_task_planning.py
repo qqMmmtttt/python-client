@@ -312,7 +312,7 @@ class TaskPlanningTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(state)),
         )
 
-    def test_delivery_breaks_guard_after_route_edge_move_is_blocked_without_target_payload(self) -> None:
+    def test_delivery_waits_on_route_edge_after_move_is_blocked_without_target_payload(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -357,12 +357,26 @@ class TaskPlanningTests(unittest.TestCase):
             ],
         )
 
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(blocked)))
+
+        settled = _state(
+            "S09",
+            bad_fruit=1,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 3, "active": True},
+                }
+            ],
+        )
         self.assertEqual(
             [{"action": "BREAK_GUARD", "targetNodeId": "S10", "goodFruit": 0, "badFruit": 1}],
-            strategy.decide(StrategyContext.from_state(blocked)),
+            strategy.decide(StrategyContext.from_state(settled)),
         )
 
-    def test_delivery_forces_pass_after_route_edge_move_is_blocked_by_strong_guard(self) -> None:
+    def test_delivery_does_not_force_pass_while_still_on_route_edge(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -393,10 +407,7 @@ class TaskPlanningTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(
-            [{"action": "FORCED_PASS", "targetNodeId": "S10"}],
-            strategy.decide(StrategyContext.from_state(blocked)),
-        )
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(blocked)))
 
 
 if __name__ == "__main__":

@@ -100,16 +100,13 @@ class RouteEdgeStateTests(unittest.TestCase):
 
         self.assertEqual([], TaskStrategy().decide(StrategyContext.from_state(state)))
 
-    def test_delivery_strategy_resumes_waiting_route_edge_to_existing_target(self) -> None:
+    def test_delivery_strategy_leaves_route_edge_progress_to_system_wait(self) -> None:
         state = _state("WAITING")
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
 
-        self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S13"}],
-            strategy.decide(StrategyContext.from_state(state)),
-        )
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
 
     def test_waiting_is_not_a_normal_main_action_state(self) -> None:
         self.assertFalse(can_submit_main_action(_state("WAITING")))

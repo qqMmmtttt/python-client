@@ -37,6 +37,14 @@ class ModelTests(unittest.TestCase):
         self.assertEqual("TRANSFER", game_map.process_nodes["S02"].process_type)
         self.assertEqual("VERIFY", game_map.process_nodes["S14"].process_type)
 
+    def test_route_distance_uses_configured_edge_distances(self) -> None:
+        map_config = json.loads(Path("example_data/map_config.json").read_text(encoding="utf-8"))
+        game_map = GameMap.from_start(map_config)
+
+        self.assertEqual(18, game_map.route_distance("S13", "S14"))
+        self.assertEqual(10, game_map.route_distance("S14", "S15"))
+        self.assertIsNone(game_map.route_distance("S01", "missing"))
+
 
 if __name__ == "__main__":
     unittest.main()

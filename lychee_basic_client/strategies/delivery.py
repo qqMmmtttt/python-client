@@ -118,23 +118,7 @@ class DeliveryStrategy:
     def _decide_while_moving(
         self, state: GameState, player: Any
     ) -> list[dict[str, Any]]:
-        if player.next_node_id:
-            blocking_action = self._route_edge_blocking_action_if_needed(state, player.next_node_id)
-            if blocking_action:
-                return [blocking_action]
-            return [self._move(player.next_node_id)]
-
-        if player.current_node_id:
-            gate = state.game_map.gate_node_id
-            terminal = state.game_map.terminal_node_ids[0]
-            target = terminal if player.verified else gate
-            next_node = self._route_policy.next_hop(state, player.current_node_id, target)
-            if next_node:
-                blocking_action = self._route_edge_blocking_action_if_needed(state, next_node)
-                if blocking_action:
-                    return [blocking_action]
-                return [self._move(next_node)]
-
+        del state, player
         return []
 
     def _move(self, target_node_id: str) -> dict[str, Any]:
@@ -184,27 +168,6 @@ class DeliveryStrategy:
 
         return None
 
-    def _route_edge_blocking_action_if_needed(
-        self,
-        state: GameState,
-        target_node_id: str,
-    ) -> Optional[dict[str, Any]]:
-        player = state.me
-        if player is None:
-            return None
-        node = state.nodes.get(target_node_id)
-        if node is not None:
-            guard = enemy_guard_at(node, player)
-            if guard is not None:
-                return self._enemy_guard_action(state, target_node_id, guard.defense)
-            if node.has_obstacle:
-                return forced_pass(target_node_id)
-            self._blocked_move_targets.discard(target_node_id)
-            return None
-        if target_node_id in self._blocked_move_targets:
-            return forced_pass(target_node_id)
-        return None
-
     def _enemy_guard_action(
         self,
         state: GameState,
@@ -217,6 +180,16 @@ class DeliveryStrategy:
             and _has_delivery_slack(state, target_node_id, margin=18)
         ):
             return break_guard(target_node_id, **payment)
+        break_order_payment = _break_guard_payment_with_break_order(state, defense)
+        if (
+            break_order_payment is not None
+            and _has_delivery_slack(state, target_node_id, margin=18)
+        ):
+            return break_guard(
+                target_node_id,
+                **break_order_payment,
+                rush_tactic="BREAK_ORDER",
+            )
         return forced_pass(target_node_id)
 
     def _observe_process_completion(self, context: StrategyContext) -> None:
@@ -290,14 +263,10 @@ def _should_bind_break_order_to_verify(state: GameState) -> bool:
     player = state.me
     if player is None:
         return False
-    if state.phase != "RUSH" or player.rush_tactic_used_count > 0:
-        return False
-    if not player.break_order_ready:
+    if not _can_bind_break_order(state):
         return False
     if player.bad_fruit >= 2:
         return True
-    if player.good_fruit <= 1:
-        return False
     return state.round_no + estimate_delivery_rounds(state, state.game_map.gate_node_id, False) >= 570
 
 
@@ -337,6 +306,56 @@ def _break_guard_payment(state: GameState, defense: int) -> Optional[dict[str, i
         return None
     good_fruit, _, bad_fruit = best
     return {"good_fruit": good_fruit, "bad_fruit": bad_fruit}
+
+
+def _break_guard_payment_with_break_order(
+    state: GameState,
+    defense: int,
+) -> Optional[dict[str, int]]:
+    player = state.me
+    if player is None or defense <= 0 or not _can_bind_break_order(state):
+        return None
+
+    break_order_good_cost, break_order_bad_cost = _break_order_cost(player)
+    available_good = player.good_fruit - break_order_good_cost
+    available_bad = player.bad_fruit - break_order_bad_cost
+    if available_good <= 0 or available_bad < 0:
+        return None
+
+    max_bad = min(2, available_bad)
+    max_good = min(2, max(0, available_good - 1))
+    best: Optional[tuple[int, int, int]] = None
+    for bad_fruit in range(max_bad + 1):
+        for good_fruit in range(max_good + 1):
+            attack = 3 + bad_fruit * 3 + good_fruit * 2
+            if attack < defense:
+                continue
+            candidate = (good_fruit, bad_fruit + good_fruit, bad_fruit)
+            if best is None or candidate < best:
+                best = candidate
+    if best is None:
+        return None
+    good_fruit, _, bad_fruit = best
+    return {"good_fruit": good_fruit, "bad_fruit": bad_fruit}
+
+
+def _can_bind_break_order(state: GameState) -> bool:
+    player = state.me
+    if player is None:
+        return False
+    if state.phase != "RUSH" or player.rush_tactic_used_count > 0:
+        return False
+    if not player.break_order_ready:
+        return False
+    if player.bad_fruit >= 2:
+        return True
+    return player.good_fruit > 1
+
+
+def _break_order_cost(player: Any) -> tuple[int, int]:
+    if player.bad_fruit >= 2:
+        return 0, 2
+    return 1, 0
 
 
 def _rejected_task_id(raw: dict[str, Any]) -> str:

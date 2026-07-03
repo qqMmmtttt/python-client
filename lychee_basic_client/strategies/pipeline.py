@@ -111,7 +111,7 @@ RESOURCE_PRIORITY = {
     "ICE_BOX": 96,
     "FAST_HORSE": 95,
     "SHORT_HORSE": 94,
-    "INTEL": 30,
+    "INTEL": 106,
 }
 RESOURCE_CLAIM_PRIORITY = {
     "ICE_BOX": 99,

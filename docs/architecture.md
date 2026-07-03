@@ -169,12 +169,12 @@ StrategyPipeline(
 - S04 登船处理：统一提交 `PROCESS`，与任务书保持一致。
 - S14：非冲刺阶段不验核，冲刺阶段提交 `VERIFY_GATE`；只有 `breakOrderReady=true`、急策未用且成本足够时才绑定 `BREAK_ORDER`。
 - S15：未验核时返回 S14；已验核且满足好果/鲜度条件时立即 `DELIVER`；安全区不再使用资源。
-- 破关令：不单独发送 `BREAK_ORDER`，也不在 `breakOrderReady=false` 时绑定到验核，避免业务前提不满足导致整包 error。
+- 破关令：不单独发送 `BREAK_ORDER`；只在准备态满足时绑定到 `BREAK_GUARD` 或 `VERIFY_GATE`，并在攻坚前预留破关令自身成本，避免业务前提不满足导致整包 error。
 - 任务拒绝：被 `CLAIM_TASK` 拒绝的任务实例会进入本局黑名单，不再抢占主线。
 - 小分队：作为独立类别和主车队动作同帧提交，不会阻塞移动、处理或交付。
 - 动作优先级：`CLEAR/BREAK_GUARD/FORCED_PASS` 高于资源和移动，关键资源领取高于普通移动，避免清障被资源策略抢占。
 - 障碍：优先 T04 拿分清障；无 T04 时有余量用 `CLEAR`，时间紧或无好果时 `FORCED_PASS`。
-- 设卡：只有一次性能攻破才 `BREAK_GUARD`，否则 `FORCED_PASS`；小分队可提前 `SQUAD_WEAKEN`，避免低攻坚值反复失败后休整。
+- 设卡：普通投入能一次攻破时 `BREAK_GUARD`；RUSH 阶段只有破关令能让本次攻坚一次成功时才绑定 `BREAK_ORDER`；仍打不穿时 `FORCED_PASS`。小分队可提前 `SQUAD_WEAKEN`，避免低攻坚值反复失败后休整。
 - 清障残留：路由代价计入对方清障残留税，减少对战中踩残留税的概率。
 
 ## 10. 日志系统

@@ -120,6 +120,27 @@ class GameMap:
                 heapq.heappush(queue, (next_cost, neighbor, path + [neighbor]))
         return []
 
+    def route_distance(self, start: str, target: str) -> Optional[int]:
+        if start == target:
+            return 0
+
+        queue: list[tuple[int, str]] = [(0, start)]
+        best_distance: dict[str, int] = {start: 0}
+
+        while queue:
+            distance, node_id = heapq.heappop(queue)
+            if node_id == target:
+                return distance
+            if distance > best_distance.get(node_id, distance):
+                continue
+            for edge, neighbor in self.iter_neighbor_edges(node_id):
+                next_distance = distance + edge.distance
+                if next_distance >= best_distance.get(neighbor, 1_000_000_000):
+                    continue
+                best_distance[neighbor] = next_distance
+                heapq.heappush(queue, (next_distance, neighbor))
+        return None
+
     def iter_neighbor_edges(self, node_id: str) -> list[tuple[Edge, str]]:
         neighbors: list[tuple[Edge, str]] = []
         for edge in self.edges:

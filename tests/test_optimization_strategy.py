@@ -88,6 +88,24 @@ class OptimizationStrategyTests(unittest.TestCase):
             ResourceStrategy().decide(StrategyContext.from_state(state)),
         )
 
+    def test_resource_strategy_uses_route_distance_for_intel_range(self) -> None:
+        state = _state("S12", round_no=450, resources={"INTEL": 1})
+
+        self.assertEqual([], ResourceStrategy().decide(StrategyContext.from_state(state)))
+
+    def test_pipeline_uses_intel_before_fixed_process(self) -> None:
+        state = _state("S13", round_no=450, resources={"INTEL": 1})
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [
+                {"action": "USE_RESOURCE", "resourceType": "INTEL", "targetNodeId": "S13"},
+                {"action": "SQUAD_SCOUT", "targetNodeId": "S04"},
+            ],
+            strategy.decide(state),
+        )
+
     def test_resource_strategy_can_claim_intel(self) -> None:
         state = _state("S10", nodes=[{"nodeId": "S10", "resourceStock": {"INTEL": 1}}])
 

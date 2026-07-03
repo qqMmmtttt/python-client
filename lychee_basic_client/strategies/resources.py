@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 from lychee_basic_client.planning.estimates import estimate_delivery_rounds
 from lychee_basic_client.planning.tasks import TASK_CUTOFF_ROUND, TASK_SCORE_GOAL
@@ -75,9 +75,10 @@ class ResourceStrategy:
         ):
             return [use_resource("ICE_BOX")]
 
-        intel_action = _intel_action_if_useful(context, player, self._used_intel_targets)
-        if intel_action:
-            return intel_action
+        if not _has_active_task_at_current_node(state, player.current_node_id):
+            intel_action = _intel_action_if_useful(context, player, self._used_intel_targets)
+            if intel_action:
+                return intel_action
 
         horse_action = [] if _is_unprocessed_transfer_node(state) else _horse_action_if_useful(state, player)
         if horse_action:
@@ -123,6 +124,17 @@ def _horse_action_if_useful(state: Any, player: Any) -> list[dict[str, Any]]:
 def _has_active_t06(state: Any) -> bool:
     for task in state.tasks:
         if str(task.get("taskTemplateId") or "") != "T06":
+            continue
+        if task.get("active", True) and not task.get("completed") and not task.get("failed"):
+            return True
+    return False
+
+
+def _has_active_task_at_current_node(state: Any, current_node_id: Optional[str]) -> bool:
+    if not current_node_id:
+        return False
+    for task in state.tasks:
+        if str(task.get("nodeId") or "") != current_node_id:
             continue
         if task.get("active", True) and not task.get("completed") and not task.get("failed"):
             return True
@@ -222,15 +234,10 @@ def _intel_targets_for_state(context: StrategyContext, current_node_id: str) -> 
 
 
 def _within_intel_range(state: Any, current_node_id: str, target_node_id: str) -> bool:
-    current = state.game_map.nodes.get(current_node_id)
-    target = state.game_map.nodes.get(target_node_id)
-    if current is None or target is None:
+    route_distance = state.game_map.route_distance(current_node_id, target_node_id)
+    if route_distance is None:
         return False
-    current_x = int(current.raw.get("x") or 0)
-    current_y = int(current.raw.get("y") or 0)
-    target_x = int(target.raw.get("x") or 0)
-    target_y = int(target.raw.get("y") or 0)
-    return max(abs(current_x - target_x), abs(current_y - target_y)) <= INTEL_RANGE_LIMIT
+    return route_distance <= INTEL_RANGE_LIMIT
 
 
 def _has_own_scout_marker(state: Any, target_node_id: str) -> bool:
