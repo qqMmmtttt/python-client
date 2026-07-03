@@ -28,6 +28,32 @@ def route_policy_is_speed_priority(route_policy: Any) -> bool:
     return False
 
 
+def has_own_active_guard(node: Any, player: PlayerState) -> bool:
+    guard = getattr(node, "guard", None) or {}
+    if guard.get("active") is False:
+        return False
+    owner = str(guard.get("ownerTeamId") or guard.get("teamId") or "")
+    return bool(owner) and owner == player.team_id
+
+
+def should_skip_task_for_wuguan_guard(
+    route_policy: Any,
+    state: GameState,
+    current_node_id: str,
+) -> bool:
+    if not route_policy_is_speed_priority(route_policy):
+        return False
+    if current_node_id != WUGUAN_NODE_ID:
+        return False
+    player = state.me
+    if player is None:
+        return False
+    node = state.nodes.get(current_node_id)
+    if node is None:
+        return False
+    return not has_own_active_guard(node, player)
+
+
 def should_prioritize_wuguan(
     route_policy: Any,
     state: GameState,
