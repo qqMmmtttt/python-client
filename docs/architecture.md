@@ -164,7 +164,7 @@ StrategyPipeline(
 
 当前已实现的关键防护：
 
-- `MOVING/WAITING`：站点动作全部停手；资源策略只允许马类资源；无动作时提交 `actions: []` 让路线继续推进。
+- `MOVING/WAITING`：正常路线边站点动作停手；资源策略只允许马类资源；无动作时提交 `actions: []`。如果服务端反馈 `MOVE_BLOCKED_BY_GUARD`，说明当前 `nextNodeId` 被敌方设卡截停，交付策略会立刻对该相邻目标破关恢复，避免空动作被服务端补成 `WAIT` 后反复拒绝。
 - 固定处理站：每次重新停靠 S02/S04/S05/S11/S13 都重新要求 `PROCESS`，处理完成后才离站。
 - S04 登船处理：统一提交 `PROCESS`，与任务书保持一致。
 - S14：非冲刺阶段不验核，冲刺阶段提交 `VERIFY_GATE`；只有 `breakOrderReady=true`、急策未用且成本足够时才绑定 `BREAK_ORDER`。

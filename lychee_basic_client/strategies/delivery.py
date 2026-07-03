@@ -31,6 +31,8 @@ class DeliveryStrategy:
         self._object_busy_nodes: set[str] = set()
         self._object_busy_recover_round: int = 0
         self._blocked_move_targets: set[str] = set()
+        self._guard_blocked_move_targets: set[str] = set()
+        self._obstacle_blocked_move_targets: set[str] = set()
         self._last_move_target: Optional[str] = None
 
     def on_start(self, state: GameState) -> None:
@@ -41,6 +43,8 @@ class DeliveryStrategy:
         self._object_busy_nodes.clear()
         self._object_busy_recover_round = 0
         self._blocked_move_targets.clear()
+        self._guard_blocked_move_targets.clear()
+        self._obstacle_blocked_move_targets.clear()
         self._last_move_target = None
         return None
 
@@ -118,7 +122,13 @@ class DeliveryStrategy:
     def _decide_while_moving(
         self, state: GameState, player: Any
     ) -> list[dict[str, Any]]:
-        del state, player
+        if player.next_node_id:
+            recovery_action = self._route_edge_recovery_action_if_needed(
+                state,
+                player.next_node_id,
+            )
+            if recovery_action:
+                return [recovery_action]
         return []
 
     def _move(self, target_node_id: str) -> dict[str, Any]:
@@ -150,6 +160,8 @@ class DeliveryStrategy:
             return None
         node = state.nodes.get(target_node_id)
         if node is None:
+            if target_node_id in self._guard_blocked_move_targets:
+                return self._unknown_guard_action(state, target_node_id)
             if target_node_id in self._blocked_move_targets:
                 return forced_pass(target_node_id)
             return None
@@ -166,6 +178,34 @@ class DeliveryStrategy:
         if guard is not None:
             return self._enemy_guard_action(state, target_node_id, guard.defense)
 
+        self._discard_blocked_target(target_node_id)
+        return None
+
+    def _route_edge_recovery_action_if_needed(
+        self,
+        state: GameState,
+        target_node_id: str,
+    ) -> Optional[dict[str, Any]]:
+        player = state.me
+        if player is None:
+            return None
+
+        node = state.nodes.get(target_node_id)
+        if node is not None:
+            guard = enemy_guard_at(node, player)
+            if guard is not None:
+                return self._enemy_guard_action(state, target_node_id, guard.defense)
+            if target_node_id in self._guard_blocked_move_targets and node.guard is None:
+                return self._unknown_guard_action(state, target_node_id)
+            if node.has_obstacle:
+                return forced_pass(target_node_id)
+            self._discard_blocked_target(target_node_id)
+            return None
+
+        if target_node_id in self._guard_blocked_move_targets:
+            return self._unknown_guard_action(state, target_node_id)
+        if target_node_id in self._obstacle_blocked_move_targets:
+            return forced_pass(target_node_id)
         return None
 
     def _enemy_guard_action(
@@ -181,6 +221,30 @@ class DeliveryStrategy:
         ):
             return break_guard(target_node_id, **payment)
         break_order_payment = _break_guard_payment_with_break_order(state, defense)
+        if (
+            break_order_payment is not None
+            and _has_delivery_slack(state, target_node_id, margin=18)
+        ):
+            return break_guard(
+                target_node_id,
+                **break_order_payment,
+                rush_tactic="BREAK_ORDER",
+            )
+        return forced_pass(target_node_id)
+
+    def _unknown_guard_action(
+        self,
+        state: GameState,
+        target_node_id: str,
+    ) -> dict[str, Any]:
+        defense_cap = _guard_defense_cap(state, target_node_id)
+        payment = _break_guard_payment(state, defense_cap)
+        if (
+            payment is not None
+            and _has_delivery_slack(state, target_node_id, margin=18)
+        ):
+            return break_guard(target_node_id, **payment)
+        break_order_payment = _break_guard_payment_with_break_order(state, defense_cap)
         if (
             break_order_payment is not None
             and _has_delivery_slack(state, target_node_id, margin=18)
@@ -216,14 +280,23 @@ class DeliveryStrategy:
                 task_id = _rejected_task_id(rejected.raw)
                 if task_id:
                     self._rejected_task_ids.add(task_id)
-            if rejected.action == "MOVE" and rejected.error_code in {
+            if rejected.error_code in {
                 "MOVE_BLOCKED_BY_GUARD",
                 "MOVE_BLOCKED_BY_OBSTACLE",
                 "BLOCKED",
             }:
-                target_node_id = _rejected_target_node(rejected.raw) or self._last_move_target or ""
+                target_node_id = (
+                    _rejected_target_node(rejected.raw)
+                    or player.next_node_id
+                    or self._last_move_target
+                    or ""
+                )
                 if target_node_id:
                     self._blocked_move_targets.add(target_node_id)
+                    if rejected.error_code == "MOVE_BLOCKED_BY_GUARD":
+                        self._guard_blocked_move_targets.add(target_node_id)
+                    elif rejected.error_code == "MOVE_BLOCKED_BY_OBSTACLE":
+                        self._obstacle_blocked_move_targets.add(target_node_id)
 
     def _observe_new_settled_node(self, state: GameState, current: str) -> None:
         if current == self._last_settled_node:
@@ -232,6 +305,11 @@ class DeliveryStrategy:
         process_node = state.game_map.process_node(current)
         if process_node is not None and process_node.process_type != "VERIFY":
             self._completed_process_nodes.discard(current)
+
+    def _discard_blocked_target(self, target_node_id: str) -> None:
+        self._blocked_move_targets.discard(target_node_id)
+        self._guard_blocked_move_targets.discard(target_node_id)
+        self._obstacle_blocked_move_targets.discard(target_node_id)
 
     def _mandatory_process_target(self, state: GameState, current: str) -> Optional[str]:
         initial_transfer = "S02"
@@ -284,6 +362,23 @@ def _should_clear_obstacle(state: GameState, target_node_id: str) -> bool:
     if state.round_no >= 430:
         return False
     return _has_delivery_slack(state, target_node_id, margin=55)
+
+
+def _guard_defense_cap(state: GameState, target_node_id: str) -> int:
+    runtime_node = state.nodes.get(target_node_id)
+    if runtime_node is not None and runtime_node.has_obstacle:
+        return 5
+    if target_node_id == state.game_map.gate_node_id:
+        return 4
+    map_node = state.game_map.nodes.get(target_node_id)
+    node_type = str(
+        (map_node.raw if map_node else {}).get("nodeType")
+        or (map_node.raw if map_node else {}).get("type")
+        or ""
+    ).upper()
+    if node_type == "KEY_PASS":
+        return 7
+    return 6
 
 
 def _break_guard_payment(state: GameState, defense: int) -> Optional[dict[str, int]]:

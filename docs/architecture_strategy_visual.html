@@ -853,7 +853,7 @@
         <table class="state-table">
           <thead><tr><th>限制</th><th>当前处理</th></tr></thead>
           <tbody>
-            <tr><td>路线边 MOVING / WAITING</td><td>交付策略提交空动作，由系统等待继续推进；站点动作停手。</td></tr>
+            <tr><td>路线边 MOVING / WAITING</td><td>正常推进时空动作；若服务端反馈 <code>MOVE_BLOCKED_BY_GUARD</code>，对当前 <code>nextNodeId</code> 破关恢复。</td></tr>
             <tr><td>非马资源</td><td>路线边不使用冰鉴和情报，避免 <code>MOVING_ACTION_FORBIDDEN</code>。</td></tr>
             <tr><td>S04 登船</td><td>使用 <code>PROCESS S04</code> 完成 BOARD，协议也允许 DOCK，但当前保持通用处理。</td></tr>
             <tr><td>S14 验核</td><td>冲刺阶段提交 <code>VERIFY_GATE</code>；破关令只在准备态满足时绑定。</td></tr>
