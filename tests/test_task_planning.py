@@ -454,6 +454,7 @@ class TaskPlanningTests(unittest.TestCase):
             StrategyContext.from_state(
                 _state(
                     "S09",
+                    round_no=10,
                     player_state="MOVING",
                     next_node_id="S10",
                     nodes=[
@@ -542,7 +543,7 @@ class TaskPlanningTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
-    def test_delivery_continues_to_pivot_node_when_no_squad_can_clear_guard(self) -> None:
+    def test_delivery_holds_after_one_pivot_until_server_reports_node_or_guard_clear(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -551,6 +552,7 @@ class TaskPlanningTests(unittest.TestCase):
             StrategyContext.from_state(
                 _state(
                     "S09",
+                    round_no=10,
                     player_state="MOVING",
                     next_node_id="S10",
                     nodes=[
@@ -582,7 +584,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S07"}],
+            [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
@@ -646,6 +648,7 @@ class TaskPlanningTests(unittest.TestCase):
 
         guard_cleared = _state(
             "S09",
+            round_no=11,
             player_state="MOVING",
             next_node_id="S07",
             nodes=[
@@ -661,6 +664,42 @@ class TaskPlanningTests(unittest.TestCase):
         self.assertEqual(
             [{"action": "MOVE", "targetNodeId": "S10"}],
             strategy.decide(StrategyContext.from_state(guard_cleared)),
+        )
+
+    def test_delivery_resumes_blocked_target_when_nodes_confirm_guard_absent(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(_state("S09"))
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S09",
+                    player_state="MOVING",
+                    next_node_id="S10",
+                    nodes=[
+                        {
+                            "nodeId": "S10",
+                            "hasObstacle": False,
+                            "resourceStock": {},
+                            "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                        }
+                    ],
+                )
+            )
+        )
+
+        guard_absent = _state(
+            "S09",
+            round_no=11,
+            player_state="MOVING",
+            next_node_id="S07",
+            nodes=[{"nodeId": "S10", "hasObstacle": False, "resourceStock": {}}],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(guard_absent)),
         )
 
     def test_delivery_resumes_blocked_target_after_squad_weaken_clears_guard(self) -> None:

@@ -36,6 +36,7 @@ class DeliveryStrategy:
         self._object_busy_recover_round: int = 0
         self._blocked_move_targets: set[str] = set()
         self._guard_blocked_move_targets: set[str] = set()
+        self._guard_blocked_rounds: dict[str, int] = {}
         self._obstacle_blocked_move_targets: set[str] = set()
         self._route_edge_resume_targets: set[str] = set()
         self._last_move_target: Optional[str] = None
@@ -49,6 +50,7 @@ class DeliveryStrategy:
         self._object_busy_recover_round = 0
         self._blocked_move_targets.clear()
         self._guard_blocked_move_targets.clear()
+        self._guard_blocked_rounds.clear()
         self._obstacle_blocked_move_targets.clear()
         self._route_edge_resume_targets.clear()
         self._last_move_target = None
@@ -155,25 +157,15 @@ class DeliveryStrategy:
                     return [self._move(recovery_target)]
 
                 if player.next_node_id != recovery_target:
-                    if _should_hold_route_edge_for_squad(state):
-                        self._logger.important(
-                            "guard_blocked_route_edge_hold round=%s state=%s from=%s blocked=%s current_next=%s action=WAIT",
-                            state.round_no,
-                            player.state,
-                            player.current_node_id,
-                            recovery_target,
-                            player.next_node_id,
-                        )
-                        return [wait()]
                     self._logger.important(
-                        "guard_blocked_route_edge_continue_pivot round=%s state=%s from=%s blocked=%s current_next=%s reason=no_squad",
+                        "guard_blocked_route_edge_hold round=%s state=%s from=%s blocked=%s current_next=%s action=WAIT reason=await_node_state",
                         state.round_no,
                         player.state,
                         player.current_node_id,
                         recovery_target,
                         player.next_node_id,
                     )
-                    return [self._move(player.next_node_id)]
+                    return [wait()]
 
                 pivot_target = self._route_edge_reset_pivot_target(
                     state,
@@ -289,7 +281,7 @@ class DeliveryStrategy:
             next_node_id = path[1]
             if enemy_guard_at(state.nodes.get(next_node_id), state.me) is not None:
                 candidates.add(next_node_id)
-                self._guard_blocked_move_targets.add(next_node_id)
+                self._remember_guard_block(state, next_node_id)
         return sorted(candidates)
 
     def _route_edge_guard_recovery_target(
@@ -323,10 +315,15 @@ class DeliveryStrategy:
     ) -> bool:
         node = state.nodes.get(target_node_id)
         if enemy_guard_at(node, state.me) is not None:
-            self._guard_blocked_move_targets.add(target_node_id)
+            self._remember_guard_block(state, target_node_id)
             return True
-        if node is not None and "guard" in node.raw:
-            self._guard_blocked_move_targets.discard(target_node_id)
+        if (
+            target_node_id in self._guard_blocked_move_targets
+            and self._guard_blocked_rounds.get(target_node_id) == state.round_no
+        ):
+            return True
+        if node is not None:
+            self._discard_guard_block(target_node_id)
             return False
         return target_node_id in self._guard_blocked_move_targets
 
@@ -468,7 +465,7 @@ class DeliveryStrategy:
             target_node_id = _cleared_guard_target_from_event(event, state.player_id)
             if target_node_id:
                 self._blocked_move_targets.discard(target_node_id)
-                self._guard_blocked_move_targets.discard(target_node_id)
+                self._discard_guard_block(target_node_id)
                 self._obstacle_blocked_move_targets.discard(target_node_id)
                 self._route_edge_resume_targets.add(target_node_id)
 
@@ -498,7 +495,7 @@ class DeliveryStrategy:
                 if target_node_id:
                     self._blocked_move_targets.add(target_node_id)
                     if rejected.error_code == "MOVE_BLOCKED_BY_GUARD":
-                        self._guard_blocked_move_targets.add(target_node_id)
+                        self._remember_guard_block(state, target_node_id)
                     elif rejected.error_code == "MOVE_BLOCKED_BY_OBSTACLE":
                         self._obstacle_blocked_move_targets.add(target_node_id)
 
@@ -512,9 +509,17 @@ class DeliveryStrategy:
 
     def _discard_blocked_target(self, target_node_id: str) -> None:
         self._blocked_move_targets.discard(target_node_id)
-        self._guard_blocked_move_targets.discard(target_node_id)
+        self._discard_guard_block(target_node_id)
         self._obstacle_blocked_move_targets.discard(target_node_id)
         self._route_edge_resume_targets.discard(target_node_id)
+
+    def _remember_guard_block(self, state: GameState, target_node_id: str) -> None:
+        self._guard_blocked_move_targets.add(target_node_id)
+        self._guard_blocked_rounds[target_node_id] = state.round_no
+
+    def _discard_guard_block(self, target_node_id: str) -> None:
+        self._guard_blocked_move_targets.discard(target_node_id)
+        self._guard_blocked_rounds.pop(target_node_id, None)
 
     def _mandatory_process_target(self, state: GameState, current: str) -> Optional[str]:
         initial_transfer = "S02"
@@ -675,13 +680,6 @@ def _should_hold_for_squad_weaken(state: GameState, defense: int) -> bool:
     if player.squad_available >= 2:
         return True
     return _squad_in_flight(player) > 0
-
-
-def _should_hold_route_edge_for_squad(state: GameState) -> bool:
-    player = state.me
-    if player is None or state.phase == "RUSH":
-        return False
-    return player.squad_available >= 2 or _squad_in_flight(player) > 0
 
 
 def _squad_in_flight(player: Any) -> int:
