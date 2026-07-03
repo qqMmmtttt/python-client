@@ -358,7 +358,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "MOVE", "targetNodeId": "S07"}],
             strategy.decide(StrategyContext.from_state(blocked)),
         )
 
@@ -398,7 +398,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "MOVE", "targetNodeId": "S07"}],
             strategy.decide(StrategyContext.from_state(blocked)),
         )
 
@@ -434,8 +434,171 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [{"action": "MOVE", "targetNodeId": "S07"}],
             strategy.decide(StrategyContext.from_state(blocked)),
+        )
+
+    def test_delivery_does_not_continue_toward_route_edge_pivot(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(_state("S09"))
+        strategy.decide(StrategyContext.from_state(_state("S09")))
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S09",
+                    player_state="MOVING",
+                    next_node_id="S10",
+                    nodes=[
+                        {
+                            "nodeId": "S10",
+                            "hasObstacle": False,
+                            "resourceStock": {},
+                            "guard": {"ownerTeamId": "BLUE", "defense": 7, "active": True},
+                        }
+                    ],
+                    events=[
+                        {
+                            "type": "ACTION_REJECTED",
+                            "payload": {
+                                "playerId": 1001,
+                                "action": "MOVE",
+                                "errorCode": "MOVE_BLOCKED_BY_GUARD",
+                            },
+                        }
+                    ],
+                )
+            )
+        )
+
+        pivot_edge = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S07",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 7, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S05"}],
+            strategy.decide(StrategyContext.from_state(pivot_edge)),
+        )
+
+    def test_delivery_resumes_blocked_target_after_route_edge_guard_is_cleared(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(_state("S09"))
+        strategy.decide(StrategyContext.from_state(_state("S09")))
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S09",
+                    player_state="MOVING",
+                    next_node_id="S10",
+                    nodes=[
+                        {
+                            "nodeId": "S10",
+                            "hasObstacle": False,
+                            "resourceStock": {},
+                            "guard": {"ownerTeamId": "BLUE", "defense": 7, "active": True},
+                        }
+                    ],
+                    events=[
+                        {
+                            "type": "ACTION_REJECTED",
+                            "payload": {
+                                "playerId": 1001,
+                                "action": "MOVE",
+                                "errorCode": "MOVE_BLOCKED_BY_GUARD",
+                            },
+                        }
+                    ],
+                )
+            )
+        )
+
+        guard_cleared = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S07",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 0, "active": False},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(guard_cleared)),
+        )
+
+    def test_delivery_resumes_blocked_target_after_squad_weaken_clears_guard(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(_state("S09"))
+        strategy.decide(StrategyContext.from_state(_state("S09")))
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S09",
+                    player_state="MOVING",
+                    next_node_id="S10",
+                    nodes=[
+                        {
+                            "nodeId": "S10",
+                            "hasObstacle": False,
+                            "resourceStock": {},
+                            "guard": {"ownerTeamId": "BLUE", "defense": 2, "active": True},
+                        }
+                    ],
+                    events=[
+                        {
+                            "type": "ACTION_REJECTED",
+                            "payload": {
+                                "playerId": 1001,
+                                "action": "MOVE",
+                                "errorCode": "MOVE_BLOCKED_BY_GUARD",
+                            },
+                        }
+                    ],
+                )
+            )
+        )
+
+        guard_cleared = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S07",
+            nodes=[{"nodeId": "S10", "hasObstacle": False, "resourceStock": {}}],
+            events=[
+                {
+                    "type": "SQUAD_WEAKEN",
+                    "payload": {
+                        "playerId": 1001,
+                        "targetNodeId": "S10",
+                        "before": 2,
+                        "after": 0,
+                    },
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(guard_cleared)),
         )
 
     def test_delivery_breaks_guard_from_detour_staging_node(self) -> None:

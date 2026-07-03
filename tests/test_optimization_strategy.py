@@ -207,7 +207,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "MOVE", "targetNodeId": "S08"},
+                {"action": "MOVE", "targetNodeId": "S07"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(state),
