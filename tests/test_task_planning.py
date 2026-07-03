@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from lychee_basic_client.config import Config
 from lychee_basic_client.models.state import GameState
+from lychee_basic_client.strategies.control import FORCE_EMPTY_ACTION
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.delivery import DeliveryStrategy
 from lychee_basic_client.strategies.routing import RoutePolicy
@@ -98,6 +99,22 @@ def _state(
             1001,
         ).game_map,
     )
+
+
+def _route_edge_reset_empty_action(
+    origin_node_id: str,
+    blocked_node_id: str,
+    pivot_node_id: str,
+    empty_rounds: int = 1,
+) -> dict[str, Any]:
+    return {
+        "action": FORCE_EMPTY_ACTION,
+        "reason": "ROUTE_EDGE_GUARD_RESET",
+        "originNodeId": origin_node_id,
+        "blockedNodeId": blocked_node_id,
+        "pivotNodeId": pivot_node_id,
+        "emptyRounds": empty_rounds,
+    }
 
 
 class TaskPlanningTests(unittest.TestCase):
@@ -543,7 +560,7 @@ class TaskPlanningTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
-    def test_delivery_holds_on_best_staging_edge_while_squad_is_in_flight(self) -> None:
+    def test_delivery_forces_empty_after_route_edge_reset_pivot(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -584,11 +601,11 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "WAIT"}],
+            [_route_edge_reset_empty_action("S09", "S10", "S08")],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
-    def test_delivery_continues_to_staging_when_no_squad_can_clear_route_edge_guard(self) -> None:
+    def test_delivery_never_continues_toward_reset_pivot_without_squad(self) -> None:
         strategy = DeliveryStrategy(
             RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
         )
@@ -629,8 +646,69 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S08"}],
+            [_route_edge_reset_empty_action("S09", "S10", "S08")],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
+        )
+
+    def test_delivery_breaks_guard_after_route_edge_reset_reaches_origin_idle(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(_state("S09"))
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S09",
+                    player_state="MOVING",
+                    next_node_id="S10",
+                    nodes=[
+                        {
+                            "nodeId": "S10",
+                            "hasObstacle": False,
+                            "resourceStock": {},
+                            "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                        }
+                    ],
+                )
+            )
+        )
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S09",
+                    player_state="MOVING",
+                    next_node_id="S08",
+                    squad_available=0,
+                    squad_in_flight=0,
+                    nodes=[
+                        {
+                            "nodeId": "S10",
+                            "hasObstacle": False,
+                            "resourceStock": {},
+                            "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                        }
+                    ],
+                )
+            )
+        )
+
+        idle_origin = _state(
+            "S09",
+            bad_fruit=1,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "BREAK_GUARD", "targetNodeId": "S10", "goodFruit": 2, "badFruit": 1}],
+            strategy.decide(StrategyContext.from_state(idle_origin)),
         )
 
     def test_delivery_breaks_adjacent_observed_guard_from_s09_node_without_squad(self) -> None:

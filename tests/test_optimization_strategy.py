@@ -274,7 +274,7 @@ class OptimizationStrategyTests(unittest.TestCase):
             strategy.decide(state),
         )
 
-    def test_pipeline_holds_pivot_edge_while_squad_weakens_observed_guard(self) -> None:
+    def test_pipeline_restages_wrong_pivot_edge_while_squad_weakens_observed_guard(self) -> None:
         state = _state(
             "S09",
             player_state="MOVING",
@@ -315,6 +315,42 @@ class OptimizationStrategyTests(unittest.TestCase):
             ],
             strategy.decide(pivot_edge),
         )
+
+    def test_pipeline_forces_empty_after_route_edge_reset_pivot(self) -> None:
+        state = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S10",
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+        strategy.decide(state)
+
+        pivot_edge = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S08",
+            resources={"FAST_HORSE": 1},
+            squad_available=6,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual([], strategy.decide(pivot_edge))
 
     def test_pipeline_does_not_let_intel_preempt_delivery_move(self) -> None:
         state = _state(

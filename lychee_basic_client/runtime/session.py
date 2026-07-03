@@ -97,9 +97,10 @@ class ClientSession:
         self._log_key_events()
         actions = self._strategy.decide(self._state)
         player = self._state.me
+        player_raw = player.raw if player else {}
         self._logger.important(
             "round=%s phase=%s player_state=%s node=%s next=%s score=%s task_score=%s "
-            "good=%s bad=%s fresh=%s weather=%s tasks=%s events=%s action_results=%s actions=%s"
+            "edge=%s move_dir=%s edge_ms=%s/%s good=%s bad=%s fresh=%s weather=%s tasks=%s events=%s action_results=%s actions=%s"
             " | 每帧决策摘要：结算帧、阶段、主车队状态与位置、资产分数、天气、可接任务、关键事件、上帧动作结果与本帧提交动作",
             self._state.round_no,
             self._state.phase,
@@ -108,6 +109,10 @@ class ClientSession:
             player.next_node_id if player else None,
             player.total_score if player else None,
             player.task_score if player else None,
+            player_raw.get("routeEdgeId"),
+            player_raw.get("moveDirection"),
+            player_raw.get("edgeProgressMs"),
+            player_raw.get("edgeTotalMs"),
             player.good_fruit if player else None,
             player.bad_fruit if player else None,
             player.freshness if player else None,

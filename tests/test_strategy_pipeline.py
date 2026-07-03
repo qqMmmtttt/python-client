@@ -3,6 +3,7 @@ from typing import Any
 
 from lychee_basic_client.models.state import GameState
 from lychee_basic_client.strategies.context import StrategyContext
+from lychee_basic_client.strategies.control import force_empty_actions
 from lychee_basic_client.strategies.pipeline import StrategyPipeline
 from lychee_basic_client.testing.fixtures import sample_start
 
@@ -55,6 +56,14 @@ class ClearStrategy:
         return [{"action": "CLEAR", "targetNodeId": "S10"}]
 
 
+class ForceEmptyStrategy:
+    def on_start(self, state: GameState) -> None:
+        return None
+
+    def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
+        return [force_empty_actions("test")]
+
+
 class StrategyPipelineTests(unittest.TestCase):
     def test_pipeline_uses_first_main_action(self) -> None:
         state = GameState.from_start(sample_start(), 1006)
@@ -85,6 +94,12 @@ class StrategyPipelineTests(unittest.TestCase):
             [{"action": "CLEAR", "targetNodeId": "S10"}],
             pipeline.decide(state),
         )
+
+    def test_force_empty_action_clears_previously_selected_actions(self) -> None:
+        state = GameState.from_start(sample_start(), 1006)
+        pipeline = StrategyPipeline([SquadStrategyStub(), MoveStrategy(), ForceEmptyStrategy()])
+
+        self.assertEqual([], pipeline.decide(state))
 
 
 if __name__ == "__main__":

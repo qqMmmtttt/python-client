@@ -13,12 +13,14 @@ from lychee_basic_client.protocol.actions import (
     move,
     process,
     verify_gate,
-    wait,
 )
 from lychee_basic_client.rules.blocking import enemy_guard_at
 from lychee_basic_client.rules.states import NODE_BUSY_STATES, ROUTE_EDGE_STATES
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.observability.logging_setup import get_logger
+from lychee_basic_client.strategies.route_edge_recovery import (
+    RouteEdgeGuardResetTracker,
+)
 from lychee_basic_client.strategies.routing import RoutePolicy
 
 
@@ -40,6 +42,7 @@ class DeliveryStrategy:
         self._obstacle_blocked_move_targets: set[str] = set()
         self._route_edge_resume_targets: set[str] = set()
         self._last_move_target: Optional[str] = None
+        self._route_edge_guard_reset = RouteEdgeGuardResetTracker(self._logger)
 
     def on_start(self, state: GameState) -> None:
         self._completed_process_nodes.clear()
@@ -54,6 +57,7 @@ class DeliveryStrategy:
         self._obstacle_blocked_move_targets.clear()
         self._route_edge_resume_targets.clear()
         self._last_move_target = None
+        self._route_edge_guard_reset.clear()
         return None
 
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
@@ -80,6 +84,7 @@ class DeliveryStrategy:
         current = player.current_node_id
         gate = state.game_map.gate_node_id
         terminal = state.game_map.terminal_node_ids[0]
+        self._route_edge_guard_reset.complete_if_idle(state, player)
         self._observe_new_settled_node(state, current)
 
         if current == terminal:
@@ -167,6 +172,12 @@ class DeliveryStrategy:
                 player.next_node_id,
             )
             if recovery_target:
+                reset_action = self._route_edge_guard_reset.force_empty_if_needed(
+                    state, player, recovery_target
+                )
+                if reset_action is not None:
+                    return [reset_action]
+
                 if not self._route_edge_target_blocked_by_guard(state, recovery_target):
                     self._discard_blocked_target(recovery_target)
                     self._logger.important(
@@ -188,9 +199,15 @@ class DeliveryStrategy:
                         player.next_node_id,
                     )
                     if staging_target and staging_target != player.next_node_id:
+                        self._route_edge_guard_reset.start(
+                            state,
+                            player.current_node_id,
+                            recovery_target,
+                            staging_target,
+                        )
                         self._logger.important(
                             "guard_blocked_route_edge_restage round=%s state=%s from=%s blocked=%s current_next=%s staging=%s"
-                            " | 路线边移动中：当前改道目标不是最佳攻坚 staging，改道到可支撑后续攻坚的相邻节点",
+                            " | 路线边设卡复位：当前换道目标不是最佳复位 pivot，重新发送一次换道 MOVE；pivot 不是实际目的地",
                             state.round_no,
                             player.state,
                             player.current_node_id,
@@ -199,30 +216,28 @@ class DeliveryStrategy:
                             staging_target,
                         )
                         return [self._move(staging_target)]
-                    if _should_hold_for_route_edge_guard_recovery(
-                        state, recovery_target
-                    ):
-                        self._logger.important(
-                            "guard_blocked_route_edge_hold round=%s state=%s from=%s blocked=%s current_next=%s action=WAIT reason=await_squad"
-                            " | 路线边移动中：目标节点仍被设卡阻挡且小分队仍可能削弱，本帧主动 WAIT 等待小分队结算事件",
-                            state.round_no,
-                            player.state,
-                            player.current_node_id,
-                            recovery_target,
-                            player.next_node_id,
-                        )
-                        return [wait()]
                     if player.next_node_id:
+                        self._route_edge_guard_reset.start(
+                            state,
+                            player.current_node_id,
+                            recovery_target,
+                            player.next_node_id,
+                        )
+                        reset_action = self._route_edge_guard_reset.force_empty_if_needed(
+                            state, player, recovery_target
+                        )
+                        if reset_action is not None:
+                            return [reset_action]
                         self._logger.important(
-                            "guard_blocked_route_edge_continue_staging round=%s state=%s from=%s blocked=%s current_next=%s reason=no_squad"
-                            " | 路线边移动中：无可用/在途小分队，继续到 staging 节点以恢复节点态，再由主车队攻坚",
+                            "guard_blocked_route_edge_reset_pending round=%s state=%s from=%s blocked=%s current_next=%s action=NONE"
+                            " | 路线边设卡复位：已处于换道边但还不能确认复位，本帧不再继续朝换道目标前进",
                             state.round_no,
                             player.state,
                             player.current_node_id,
                             recovery_target,
                             player.next_node_id,
                         )
-                        return [self._move(player.next_node_id)]
+                        return []
                     return []
 
                 pivot_target = self._route_edge_reset_pivot_target(
@@ -232,9 +247,15 @@ class DeliveryStrategy:
                     player.next_node_id,
                 )
                 if pivot_target:
+                    self._route_edge_guard_reset.start(
+                        state,
+                        player.current_node_id,
+                        recovery_target,
+                        pivot_target,
+                    )
                     self._logger.important(
                         "guard_blocked_route_edge_reset round=%s state=%s from=%s blocked=%s current_next=%s pivot=%s"
-                        " | 路线边移动中：目标被设卡阻挡，改道前往绕行枢纽节点",
+                        " | 路线边设卡复位：目标被设卡阻挡，发送一次换道 MOVE 触发服务端回到起点节点；pivot 不是实际目的地",
                         state.round_no,
                         player.state,
                         player.current_node_id,
@@ -860,20 +881,6 @@ def _should_hold_for_squad_weaken(state: GameState, defense: int) -> bool:
     if player.squad_available >= 2:
         return True
     return _squad_in_flight(player) > 0
-
-
-def _should_hold_for_route_edge_guard_recovery(
-    state: GameState,
-    target_node_id: str,
-) -> bool:
-    player = state.me
-    if player is None or state.phase == "RUSH":
-        return False
-    node = state.nodes.get(target_node_id)
-    guard = enemy_guard_at(node, player)
-    if guard is None:
-        return False
-    return player.squad_available >= 2 or _squad_in_flight(player) > 0
 
 
 def _squad_in_flight(player: Any) -> int:

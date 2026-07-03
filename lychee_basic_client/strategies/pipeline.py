@@ -4,6 +4,7 @@ from lychee_basic_client.models.state import GameState
 from lychee_basic_client.observability.logging_setup import get_logger
 
 from .base import Strategy
+from .control import is_force_empty_action
 from .context import StrategyContext
 
 
@@ -29,6 +30,14 @@ class StrategyPipeline:
                 actions,
             )
             for action in actions:
+                if is_force_empty_action(action):
+                    self._logger.important(
+                        "decision round=%s strategy=%s actions=[] control=%s | 策略请求本帧强制空动作，将清空已合并动作并提交空动作心跳",
+                        state.round_no,
+                        strategy_name,
+                        action,
+                    )
+                    return []
                 categories = _action_categories(action)
                 priority = _action_priority(action)
                 conflicts = [
