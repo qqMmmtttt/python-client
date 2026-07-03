@@ -1,0 +1,897 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>一骑红尘客户端架构与策略可视化</title>
+  <style>
+    :root {
+      --paper: #f8f3e8;
+      --paper-2: #efe4d0;
+      --ink: #26302f;
+      --muted: #68706b;
+      --line: #c8b99d;
+      --river: #2f7f9f;
+      --river-soft: #d9eef0;
+      --road: #a77842;
+      --lychee: #b8332c;
+      --leaf: #4b7c52;
+      --gold: #c28b2d;
+      --night: #1f2d35;
+      --white: #fffaf1;
+      --shadow: 0 18px 45px rgba(67, 49, 29, .16);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: var(--ink);
+      background:
+        linear-gradient(90deg, rgba(123, 83, 38, .08) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(123, 83, 38, .06) 1px, transparent 1px),
+        radial-gradient(circle at 18% 12%, rgba(184, 51, 44, .12), transparent 26%),
+        radial-gradient(circle at 82% 8%, rgba(47, 127, 159, .14), transparent 28%),
+        var(--paper);
+      background-size: 32px 32px, 32px 32px, auto, auto, auto;
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .page {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr);
+      gap: 24px;
+      min-height: 380px;
+      align-items: stretch;
+      margin-bottom: 24px;
+    }
+
+    .hero-copy {
+      position: relative;
+      overflow: hidden;
+      padding: 34px;
+      color: var(--white);
+      background:
+        linear-gradient(135deg, rgba(31, 45, 53, .98), rgba(39, 58, 54, .94)),
+        var(--night);
+      border: 1px solid rgba(255, 250, 241, .18);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-copy::after {
+      content: "";
+      position: absolute;
+      right: -70px;
+      top: -90px;
+      width: 260px;
+      height: 260px;
+      border: 1px solid rgba(216, 188, 123, .45);
+      transform: rotate(23deg);
+    }
+
+    .kicker {
+      display: inline-flex;
+      gap: 10px;
+      align-items: center;
+      margin: 0 0 18px;
+      color: #f3cf83;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .seal {
+      width: 34px;
+      height: 34px;
+      display: inline-grid;
+      place-items: center;
+      color: var(--white);
+      background: var(--lychee);
+      border: 1px solid rgba(255, 250, 241, .48);
+      font-family: "KaiTi", "STKaiti", serif;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      font-family: "STZhongsong", "SimSun", "Microsoft YaHei", serif;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      max-width: 900px;
+      font-size: clamp(38px, 6vw, 76px);
+      line-height: 1.02;
+    }
+
+    .hero-copy p {
+      max-width: 760px;
+      margin: 22px 0 0;
+      color: rgba(255, 250, 241, .78);
+      font-size: 17px;
+    }
+
+    .hero-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 28px;
+    }
+
+    .metric {
+      min-height: 86px;
+      padding: 13px 12px;
+      background: rgba(255, 250, 241, .08);
+      border: 1px solid rgba(255, 250, 241, .14);
+      border-radius: 6px;
+    }
+
+    .metric strong {
+      display: block;
+      color: var(--white);
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .metric span {
+      display: block;
+      margin-top: 8px;
+      color: rgba(255, 250, 241, .68);
+      font-size: 12px;
+    }
+
+    .route-map {
+      position: relative;
+      min-height: 100%;
+      padding: 26px;
+      background: rgba(255, 250, 241, .72);
+      border: 1px solid rgba(81, 59, 34, .18);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .route-map h2 {
+      font-size: 23px;
+      margin-bottom: 6px;
+    }
+
+    .route-map p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .map-svg {
+      width: 100%;
+      height: 285px;
+      margin-top: 18px;
+      display: block;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      gap: 7px;
+      align-items: center;
+    }
+
+    .swatch {
+      width: 18px;
+      height: 6px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .swatch.water {
+      background: var(--river);
+    }
+
+    .swatch.land {
+      background: var(--road);
+    }
+
+    .swatch.lock {
+      background: var(--lychee);
+    }
+
+    .section {
+      margin-top: 24px;
+      padding: 26px;
+      background: rgba(255, 250, 241, .78);
+      border: 1px solid rgba(81, 59, 34, .16);
+      border-radius: var(--radius);
+      box-shadow: 0 12px 32px rgba(67, 49, 29, .1);
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: end;
+      margin-bottom: 20px;
+      border-bottom: 1px solid rgba(81, 59, 34, .14);
+      padding-bottom: 16px;
+    }
+
+    .section h2 {
+      font-size: 28px;
+    }
+
+    .section-head p {
+      max-width: 720px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      text-align: right;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 18px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .module-board {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .module {
+      min-height: 128px;
+      padding: 15px;
+      background: var(--white);
+      border: 1px solid rgba(81, 59, 34, .14);
+      border-left: 5px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .module.protocol { border-left-color: var(--river); }
+    .module.runtime { border-left-color: var(--lychee); }
+    .module.models { border-left-color: var(--leaf); }
+    .module.planning { border-left-color: var(--gold); }
+    .module.strategy { border-left-color: #6d5b9a; }
+    .module.ops { border-left-color: #4d6470; }
+
+    .module h3 {
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+
+    .module p {
+      margin: 0 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .chip {
+      padding: 4px 7px;
+      color: #3c3932;
+      background: #f1e4cc;
+      border: 1px solid rgba(81, 59, 34, .12);
+      border-radius: 999px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 11px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .flow-step {
+      position: relative;
+      min-height: 118px;
+      padding: 14px 12px;
+      background: #fff9ee;
+      border: 1px solid rgba(81, 59, 34, .16);
+      border-radius: 6px;
+    }
+
+    .flow-step::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -11px;
+      width: 12px;
+      height: 2px;
+      background: var(--line);
+    }
+
+    .flow-step:last-child::after {
+      display: none;
+    }
+
+    .flow-step b {
+      display: block;
+      color: var(--lychee);
+      font-size: 13px;
+      margin-bottom: 6px;
+    }
+
+    .flow-step strong {
+      display: block;
+      font-size: 15px;
+      line-height: 1.25;
+    }
+
+    .flow-step span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(130px, 1fr));
+      gap: 12px;
+    }
+
+    .strategy-card {
+      min-height: 180px;
+      padding: 14px;
+      color: var(--white);
+      background: var(--night);
+      border: 1px solid rgba(255, 250, 241, .15);
+      border-radius: 6px;
+    }
+
+    .strategy-card:nth-child(2) { background: #2f5254; }
+    .strategy-card:nth-child(3) { background: #604b2e; }
+    .strategy-card:nth-child(4) { background: #344e3a; }
+    .strategy-card:nth-child(5) { background: #7c3a33; }
+    .strategy-card:nth-child(6) { background: #2c455f; }
+
+    .strategy-card .index {
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      margin-bottom: 14px;
+      color: var(--night);
+      background: var(--white);
+      border-radius: 50%;
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    .strategy-card h3 {
+      font-size: 17px;
+      margin-bottom: 8px;
+    }
+
+    .strategy-card p {
+      margin: 0;
+      color: rgba(255, 250, 241, .78);
+      font-size: 12px;
+    }
+
+    .lane-board {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(10, minmax(70px, 1fr));
+      gap: 10px;
+      padding: 18px;
+      background: linear-gradient(180deg, #fbf4e5, #efe2ca);
+      border: 1px solid rgba(81, 59, 34, .16);
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+
+    .node {
+      position: relative;
+      min-width: 70px;
+      min-height: 82px;
+      display: grid;
+      place-items: center;
+      align-content: center;
+      text-align: center;
+      background: var(--white);
+      border: 2px solid var(--line);
+      border-radius: 6px;
+      z-index: 1;
+    }
+
+    .node.water {
+      border-color: var(--river);
+      background: var(--river-soft);
+    }
+
+    .node.locked {
+      border-color: var(--lychee);
+      background: #f7ded9;
+    }
+
+    .node small {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 4px;
+    }
+
+    .arrow {
+      display: grid;
+      place-items: center;
+      color: var(--river);
+      font-weight: 900;
+      font-size: 19px;
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .decision-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .decision-item {
+      display: grid;
+      grid-template-columns: 32px 1fr;
+      gap: 10px;
+      padding: 13px;
+      background: var(--white);
+      border: 1px solid rgba(81, 59, 34, .14);
+      border-radius: 6px;
+    }
+
+    .decision-item i {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      color: var(--white);
+      background: var(--lychee);
+      border-radius: 50%;
+      font-style: normal;
+      font-weight: 800;
+    }
+
+    .decision-item strong {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .decision-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .state-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      background: var(--white);
+      border: 1px solid rgba(81, 59, 34, .16);
+      border-radius: 6px;
+    }
+
+    .state-table th,
+    .state-table td {
+      padding: 11px 12px;
+      border-bottom: 1px solid rgba(81, 59, 34, .1);
+      text-align: left;
+      vertical-align: top;
+      font-size: 13px;
+    }
+
+    .state-table th {
+      color: var(--night);
+      background: #eadbbf;
+      font-weight: 800;
+    }
+
+    .state-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .priority-strip {
+      display: grid;
+      grid-template-columns: repeat(8, minmax(100px, 1fr));
+      gap: 8px;
+    }
+
+    .priority {
+      min-height: 76px;
+      padding: 10px;
+      color: var(--white);
+      background: var(--night);
+      border-radius: 6px;
+    }
+
+    .priority:nth-child(2n) { background: #2f5254; }
+    .priority:nth-child(3n) { background: #674935; }
+    .priority b {
+      display: block;
+      font-size: 20px;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+    .priority span {
+      display: block;
+      color: rgba(255, 250, 241, .78);
+      font-size: 12px;
+    }
+
+    .log-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .log-card {
+      min-height: 130px;
+      padding: 14px;
+      background: var(--white);
+      border: 1px solid rgba(81, 59, 34, .14);
+      border-top: 4px solid var(--line);
+      border-radius: 6px;
+    }
+
+    .log-card.trace { border-top-color: #7c8790; }
+    .log-card.info { border-top-color: var(--river); }
+    .log-card.important { border-top-color: var(--gold); }
+    .log-card.error { border-top-color: var(--lychee); }
+    .log-card h3 {
+      font-size: 16px;
+      margin-bottom: 8px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+    }
+    .log-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .foot {
+      margin: 24px 0 4px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    code {
+      padding: 2px 5px;
+      color: #1d4b5f;
+      background: rgba(47, 127, 159, .1);
+      border-radius: 4px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: .92em;
+    }
+
+    @media (max-width: 1180px) {
+      .hero,
+      .decision,
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+      .module-board,
+      .grid-3 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .pipeline,
+      .flow,
+      .priority-strip,
+      .log-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .section-head {
+        display: block;
+      }
+      .section-head p {
+        margin-top: 8px;
+        text-align: left;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        padding: 14px;
+      }
+      .hero-copy,
+      .route-map,
+      .section {
+        padding: 18px;
+      }
+      .hero-metrics,
+      .module-board,
+      .grid-3,
+      .pipeline,
+      .flow,
+      .priority-strip,
+      .log-grid {
+        grid-template-columns: 1fr;
+      }
+      .flow-step::after {
+        display: none;
+      }
+      .map-svg {
+        height: 235px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="kicker"><span class="seal">荔</span> Python Client Visual Brief</p>
+        <h1>架构与策略一屏读懂</h1>
+        <p>当前客户端围绕“协议稳定、日志可复盘、策略可扩展、送达优先”组织。第一轮地图的主线已锁定为从南岭驿前往江南码头乘船，并在水路换运后进入洛阳、武关、朱雀门。</p>
+        <div class="hero-metrics" aria-label="当前工程概览">
+          <div class="metric"><strong>6</strong><span>默认策略模块</span></div>
+          <div class="metric"><strong>4</strong><span>动作类别合并</span></div>
+          <div class="metric"><strong>62</strong><span>回归测试通过</span></div>
+          <div class="metric"><strong>水路</strong><span>S02 -> S04 -> S05</span></div>
+        </div>
+      </div>
+
+      <aside class="route-map">
+        <h2>当前主路线</h2>
+        <p>最下方水路：南岭驿到江南码头乘船，再到洞庭水驿换运。</p>
+        <svg class="map-svg" viewBox="0 0 560 300" role="img" aria-label="第一轮水路主线示意图">
+          <defs>
+            <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f7f9f"></path>
+            </marker>
+            <marker id="arrowRoad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#a77842"></path>
+            </marker>
+          </defs>
+          <path d="M70 230 C115 210 145 185 170 150 C210 96 260 86 312 95 C352 101 376 130 412 118 C455 103 491 83 520 62" fill="none" stroke="#a77842" stroke-width="4" stroke-dasharray="8 8" marker-end="url(#arrowRoad)"></path>
+          <path d="M118 226 C175 262 246 260 292 226 C332 197 362 178 420 162" fill="none" stroke="#2f7f9f" stroke-width="8" stroke-linecap="round" marker-end="url(#arrowBlue)"></path>
+          <path d="M421 162 C451 142 481 103 520 62" fill="none" stroke="#a77842" stroke-width="5" marker-end="url(#arrowRoad)"></path>
+          <g font-family="Microsoft YaHei, sans-serif" text-anchor="middle">
+            <g transform="translate(70,230)">
+              <rect x="-24" y="-18" width="48" height="36" rx="6" fill="#fffaf1" stroke="#c8b99d" stroke-width="2"></rect>
+              <text y="4" font-size="13" font-weight="700" fill="#26302f">S01</text>
+            </g>
+            <g transform="translate(118,226)">
+              <rect x="-28" y="-20" width="56" height="40" rx="6" fill="#f7ded9" stroke="#b8332c" stroke-width="2"></rect>
+              <text y="-1" font-size="13" font-weight="700" fill="#26302f">S02</text>
+              <text y="13" font-size="9" fill="#68706b">南岭驿</text>
+            </g>
+            <g transform="translate(215,254)">
+              <rect x="-30" y="-20" width="60" height="40" rx="6" fill="#d9eef0" stroke="#2f7f9f" stroke-width="2"></rect>
+              <text y="-1" font-size="13" font-weight="700" fill="#26302f">S04</text>
+              <text y="13" font-size="9" fill="#68706b">江南码头</text>
+            </g>
+            <g transform="translate(292,226)">
+              <rect x="-30" y="-20" width="60" height="40" rx="6" fill="#d9eef0" stroke="#2f7f9f" stroke-width="2"></rect>
+              <text y="-1" font-size="13" font-weight="700" fill="#26302f">S05</text>
+              <text y="13" font-size="9" fill="#68706b">洞庭水驿</text>
+            </g>
+            <g transform="translate(420,162)">
+              <rect x="-28" y="-20" width="56" height="40" rx="6" fill="#fffaf1" stroke="#c8b99d" stroke-width="2"></rect>
+              <text y="-1" font-size="13" font-weight="700" fill="#26302f">S09</text>
+              <text y="13" font-size="9" fill="#68706b">洛阳驿</text>
+            </g>
+            <g transform="translate(520,62)">
+              <rect x="-28" y="-20" width="56" height="40" rx="6" fill="#fffaf1" stroke="#b8332c" stroke-width="2"></rect>
+              <text y="-1" font-size="13" font-weight="700" fill="#26302f">S14</text>
+              <text y="13" font-size="9" fill="#68706b">朱雀门</text>
+            </g>
+            <g transform="translate(185,140)" opacity=".85">
+              <rect x="-24" y="-18" width="48" height="36" rx="6" fill="#fffaf1" stroke="#a77842" stroke-width="2"></rect>
+              <text y="4" font-size="13" font-weight="700" fill="#26302f">S03</text>
+            </g>
+            <g transform="translate(310,95)" opacity=".85">
+              <rect x="-24" y="-18" width="48" height="36" rx="6" fill="#fffaf1" stroke="#a77842" stroke-width="2"></rect>
+              <text y="4" font-size="13" font-weight="700" fill="#26302f">S07</text>
+            </g>
+          </g>
+          <text x="238" y="288" fill="#2f7f9f" font-size="13" font-weight="700">强制水路前段：S02 -> S04 -> S05</text>
+          <text x="280" y="58" fill="#a77842" font-size="12">陆路任务点不再打断水路主线</text>
+        </svg>
+        <div class="legend">
+          <span class="legend-item"><span class="swatch water"></span>水路主线</span>
+          <span class="legend-item"><span class="swatch land"></span>陆路/后段官道</span>
+          <span class="legend-item"><span class="swatch lock"></span>硬约束站点</span>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>软件架构</h2>
+        <p>工程按职责分层：协议只管收发，模型只管解析，规划和规则沉淀复用逻辑，策略层只做决策，日志和测试围住整个运行闭环。</p>
+      </div>
+      <div class="module-board">
+        <article class="module protocol">
+          <h3>协议层</h3>
+          <p>处理 5 位长度前缀、消息封装、动作字典构造。</p>
+          <div class="chips"><span class="chip">protocol/framing.py</span><span class="chip">protocol/actions.py</span></div>
+        </article>
+        <article class="module runtime">
+          <h3>运行层</h3>
+          <p>TCP 会话主循环，接收 start/inquire，调用策略并回传 action。</p>
+          <div class="chips"><span class="chip">runtime/session.py</span><span class="chip">basic_client.py</span></div>
+        </article>
+        <article class="module models">
+          <h3>模型与事件</h3>
+          <p>解析地图、玩家、节点、天气、任务、事件和动作结果。</p>
+          <div class="chips"><span class="chip">models/state.py</span><span class="chip">events/handlers.py</span></div>
+        </article>
+        <article class="module planning">
+          <h3>规划与规则</h3>
+          <p>路线 profile、耗时估算、任务选择、状态限制和阻挡规则。</p>
+          <div class="chips"><span class="chip">planning/tasks.py</span><span class="chip">rules/states.py</span></div>
+        </article>
+        <article class="module strategy">
+          <h3>策略层</h3>
+          <p>窗口、小分队、任务、资源、急策、交付六个策略解耦组合。</p>
+          <div class="chips"><span class="chip">strategies/factory.py</span><span class="chip">strategies/delivery.py</span></div>
+        </article>
+        <article class="module ops">
+          <h3>观测与测试</h3>
+          <p>分级日志落盘，单测覆盖协议、模型、路由、策略和防卡死回归。</p>
+          <div class="chips"><span class="chip">observability/</span><span class="chip">tests/</span></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>运行消息流</h2>
+        <p>客户端不是一次性脚本，而是逐帧响应服务端询问。每一帧都会更新状态、汇总事件、执行策略管线、记录日志并提交动作。</p>
+      </div>
+      <div class="flow">
+        <div class="flow-step"><b>01</b><strong>registration</strong><span>注册玩家信息与版本。</span></div>
+        <div class="flow-step"><b>02</b><strong>start</strong><span>解析地图、角色、处理点和资源。</span></div>
+        <div class="flow-step"><b>03</b><strong>ready</strong><span>进入对局等待逐帧询问。</span></div>
+        <div class="flow-step"><b>04</b><strong>inquire</strong><span>读取玩家、节点、任务、天气、事件。</span></div>
+        <div class="flow-step"><b>05</b><strong>StrategyPipeline</strong><span>合并主车队、小分队、窗口和急策动作。</span></div>
+        <div class="flow-step"><b>06</b><strong>action</strong><span>提交动作包，同时写 trace/important 日志。</span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>默认策略管线</h2>
+        <p>管线按模块独立输出动作，再按动作类别和优先级裁决。同帧可以组合主车队动作、小分队动作、窗口牌和急策。</p>
+      </div>
+      <div class="pipeline">
+        <article class="strategy-card"><span class="index">1</span><h3>Combat</h3><p>窗口争夺出牌，优先护卫点、献贡、文书、强行。</p></article>
+        <article class="strategy-card"><span class="index">2</span><h3>Squad</h3><p>提前探路、远程清障、削弱敌方设卡，不占主车队动作。</p></article>
+        <article class="strategy-card"><span class="index">3</span><h3>Task</h3><p>当前节点可安全做任务时提交 CLAIM_TASK。</p></article>
+        <article class="strategy-card"><span class="index">4</span><h3>Resource</h3><p>领取关键资源，使用冰鉴、马类、情报；路线边只用马。</p></article>
+        <article class="strategy-card"><span class="index">5</span><h3>Rush</h3><p>冲刺阶段路线边时间偏紧时使用疾行令。</p></article>
+        <article class="strategy-card"><span class="index">6</span><h3>Delivery</h3><p>固定处理、水路主线、阻挡处理、宫门验核、终点交付。</p></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>主线策略</h2>
+        <p>S02/S04/S05 是水路前段硬约束：即使出现 S03/S07 的高分任务，也不打断从南岭驿去江南码头乘船的路径。</p>
+      </div>
+      <div class="lane-board" aria-label="水路主线节点序列">
+        <div class="node">S01<small>岭南果园</small></div>
+        <div class="arrow">→</div>
+        <div class="node locked">S02<small>南岭驿<br>PROCESS</small></div>
+        <div class="arrow">→</div>
+        <div class="node water">S04<small>江南码头<br>PROCESS</small></div>
+        <div class="arrow">→</div>
+        <div class="node water">S05<small>洞庭水驿<br>PROCESS</small></div>
+        <div class="arrow">→</div>
+        <div class="node">S09<small>洛阳驿</small></div>
+        <div class="arrow">→</div>
+        <div class="node">S10<small>武关</small></div>
+        <div class="arrow">→</div>
+        <div class="node">S11<small>潼关驿<br>PROCESS</small></div>
+        <div class="arrow">→</div>
+        <div class="node">S13<small>灞桥驿<br>PROCESS</small></div>
+        <div class="arrow">→</div>
+        <div class="node locked">S14<small>朱雀门<br>VERIFY</small></div>
+        <div class="arrow">→</div>
+        <div class="node">S15<small>兴庆宫<br>DELIVER</small></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>S09 / S10 阻挡处理</h2>
+        <p>普通 MOVE 到被阻挡的 S10 会被拒绝。策略必须先在相邻节点 S09 发清障、破卡或强制通行。</p>
+      </div>
+      <div class="decision">
+        <div class="decision-list">
+          <div class="decision-item"><i>1</i><div><strong>S10 有道路障碍</strong><span>从 S09 直接提交 <code>CLEAR S10</code>；清障后仍在 S09，再 <code>MOVE S10</code>。</span></div></div>
+          <div class="decision-item"><i>2</i><div><strong>S10 有 T04 任务</strong><span>优先 <code>CLAIM_TASK</code>，同步拿分并清障，避免白白消耗清障收益。</span></div></div>
+          <div class="decision-item"><i>3</i><div><strong>S10 有敌方设卡</strong><span>如果一次能攻破，提交 <code>BREAK_GUARD S10</code>；攻破后再移动。</span></div></div>
+          <div class="decision-item"><i>4</i><div><strong>时间或果品不足</strong><span>提交 <code>FORCED_PASS S10</code>，优先保证抵达终点。</span></div></div>
+        </div>
+        <table class="state-table">
+          <thead><tr><th>限制</th><th>当前处理</th></tr></thead>
+          <tbody>
+            <tr><td>路线边 MOVING / WAITING</td><td>继续提交当前 <code>nextNodeId</code> 的 <code>MOVE</code>，站点动作停手。</td></tr>
+            <tr><td>非马资源</td><td>路线边不使用冰鉴和情报，避免 <code>MOVING_ACTION_FORBIDDEN</code>。</td></tr>
+            <tr><td>S04 登船</td><td>使用 <code>PROCESS S04</code> 完成 BOARD，协议也允许 DOCK，但当前保持通用处理。</td></tr>
+            <tr><td>S14 验核</td><td>冲刺阶段提交 <code>VERIFY_GATE</code>；破关令只在准备态满足时绑定。</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>主动作优先级</h2>
+        <p>同一帧多个策略都想占用主车队动作时，低价值动作会让位给交付、验核、阻挡处理和固定处理。</p>
+      </div>
+      <div class="priority-strip">
+        <div class="priority"><b>130</b><span>DELIVER</span></div>
+        <div class="priority"><b>120</b><span>VERIFY_GATE</span></div>
+        <div class="priority"><b>115</b><span>CLEAR / BREAK / PASS</span></div>
+        <div class="priority"><b>105</b><span>PROCESS</span></div>
+        <div class="priority"><b>100</b><span>CLAIM_TASK</span></div>
+        <div class="priority"><b>96-94</b><span>ICE / HORSE</span></div>
+        <div class="priority"><b>90</b><span>MOVE</span></div>
+        <div class="priority"><b>30</b><span>INTEL</span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <h2>日志与测试</h2>
+        <p>日志用于赛后定位协议和策略问题，测试用于锁住已经踩过的卡死点。</p>
+      </div>
+      <div class="log-grid">
+        <article class="log-card trace"><h3>trace.log</h3><p>记录每条与服务器交互的原始消息、长度前缀和 JSON body。</p></article>
+        <article class="log-card info"><h3>info.log</h3><p>记录普通调试信息和可恢复 warning。</p></article>
+        <article class="log-card important"><h3>important.log</h3><p>记录任务、天气、事件、动作结果、策略来源和最终动作。</p></article>
+        <article class="log-card error"><h3>error.log</h3><p>记录协议错误、读帧异常、启动错误等会导致异常退赛的问题。</p></article>
+      </div>
+    </section>
+
+    <p class="foot">Generated for the current Python client state. Open this file directly in a browser: docs/architecture_strategy_visual.html</p>
+  </main>
+</body>
+</html>

@@ -40,7 +40,7 @@ lychee_basic_client/
 
 后续可以在 `strategies/` 下继续增强任务选择、资源使用、窗口博弈、设卡和对手建模策略。
 
-更详细的工程说明见 `docs/architecture.md`，当前策略说明见 `docs/strategy.md`。
+更详细的工程说明见 `docs/architecture.md`，当前策略说明见 `docs/strategy.md`；可视化总览见 `docs/architecture_strategy_visual.html`。
 
 路线策略通过 `--route-profile` 控制：
 
