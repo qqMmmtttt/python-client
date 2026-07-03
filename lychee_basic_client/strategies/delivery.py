@@ -73,11 +73,13 @@ class DeliveryStrategy:
         self._route_edge_resume_targets.clear()
         self._last_move_target = None
         self._route_edge_guard_reset.clear()
+        self._route_policy.on_start(state)
         return None
 
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
         state = context.state
         self._observe_process_completion(context)
+        self._route_policy.observe_contest_result(state)
 
         player = state.me
         if player is None or player.delivered:

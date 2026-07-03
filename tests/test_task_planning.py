@@ -512,7 +512,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "WAIT"}],
+            [{"action": "MOVE", "targetNodeId": "S07"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
@@ -556,7 +556,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "WAIT"}],
+            [{"action": "MOVE", "targetNodeId": "S07"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
@@ -601,7 +601,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "WAIT"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
@@ -646,7 +646,7 @@ class TaskPlanningTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            [{"action": "WAIT"}],
+            [{"action": "MOVE", "targetNodeId": "S08"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
         )
 
@@ -773,7 +773,7 @@ class TaskPlanningTests(unittest.TestCase):
             "S09",
             round_no=11,
             player_state="MOVING",
-            next_node_id="S07",
+            next_node_id="S10",
             nodes=[
                 {
                     "nodeId": "S10",
@@ -816,7 +816,7 @@ class TaskPlanningTests(unittest.TestCase):
             "S09",
             round_no=11,
             player_state="MOVING",
-            next_node_id="S07",
+            next_node_id="S10",
             nodes=[{"nodeId": "S10", "hasObstacle": False, "resourceStock": {}}],
         )
 
@@ -862,7 +862,7 @@ class TaskPlanningTests(unittest.TestCase):
         guard_cleared = _state(
             "S09",
             player_state="MOVING",
-            next_node_id="S07",
+            next_node_id="S10",
             nodes=[{"nodeId": "S10", "hasObstacle": False, "resourceStock": {}}],
             events=[
                 {

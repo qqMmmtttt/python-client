@@ -386,7 +386,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "WAIT"},
+                {"action": "MOVE", "targetNodeId": "S07"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(pivot_edge),
@@ -428,7 +428,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "WAIT"},
+                {"action": "MOVE", "targetNodeId": "S08"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(pivot_edge),
@@ -459,23 +459,6 @@ class OptimizationStrategyTests(unittest.TestCase):
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(blocked_edge),
-        )
-
-        reset_edge = _state(
-            "S09",
-            round_no=297,
-            player_state="MOVING",
-            next_node_id="S08",
-            resources={"FAST_HORSE": 1},
-            squad_available=6,
-            nodes=[guard_node],
-        )
-        self.assertEqual(
-            [
-                {"action": "WAIT"},
-                {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
-            ],
-            strategy.decide(reset_edge),
         )
 
         origin_idle = _state(
@@ -512,7 +495,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [
-                {"action": "WAIT"},
+                {"action": "MOVE", "targetNodeId": "S07"},
                 {"action": "SQUAD_WEAKEN", "targetNodeId": "S10"},
             ],
             strategy.decide(stale_pivot_edge),

@@ -54,3 +54,19 @@ FIRST_ROUND_LAND_EDGE_DISTANCES = {
 
 FIRST_ROUND_SAFE_ROUTE = FIRST_ROUND_WATER_ROUTE
 FIRST_ROUND_EDGE_DISTANCES = FIRST_ROUND_WATER_EDGE_DISTANCES
+
+# 南岭驿（S02）窗口争夺失败后的替代路线：
+# S02 → S04（江南码头）→ S07（荆襄大驿）→ S09（洛阳驿）→ S10（武关）→ ... → S15
+# 跳过水路主段 S04→S05→S09，改走支路 S04→S07 与官道 S07→S09
+ALTERNATE_ROUTE_AFTER_S02_LOSS = [
+    "S02",
+    "S04",
+    "S07",
+    "S09",
+    "S10",
+    "S11",
+    "S12",
+    "S13",
+    "S14",
+    "S15",
+]
