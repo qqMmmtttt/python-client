@@ -124,7 +124,6 @@ class GuardStrategy:
 
         speed_guard = self._speed_priority_wuguan_guard(state, player, current)
         if speed_guard is not None:
-            self._attempted_nodes.add(current)
             return [speed_guard]
 
         if player.task_score < TASK_SCORE_GOAL:

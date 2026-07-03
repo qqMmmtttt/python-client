@@ -30,6 +30,7 @@ from lychee_basic_client.strategies.route_edge_guard import (
 )
 from lychee_basic_client.strategies.routing import RoutePolicy
 from lychee_basic_client.strategies.speed_priority import (
+    should_skip_task_for_wuguan_guard,
     speed_priority_task_target_allowed,
 )
 
@@ -168,7 +169,17 @@ class DeliveryStrategy:
             )
             task_target = None
         if task_target is not None and task_target.stand_node_id == current:
-            return [claim_task(task_target.task_id)]
+            if should_skip_task_for_wuguan_guard(self._route_policy, state, current):
+                self._logger.important(
+                    "task_claim_skip_wuguan_guard round=%s current=%s task=%s"
+                    " | 速度优先：当前在武关且尚未设卡，跳过任务领取让 GuardStrategy 优先 SET_GUARD",
+                    state.round_no,
+                    current,
+                    task_target.task_id,
+                )
+                task_target = None
+            else:
+                return [claim_task(task_target.task_id)]
         target = task_target.stand_node_id if task_target is not None else gate
         if player.verified:
             target = terminal
