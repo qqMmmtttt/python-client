@@ -31,6 +31,7 @@ class DeliveryStrategy:
         self._object_busy_nodes: set[str] = set()
         self._object_busy_recover_round: int = 0
         self._blocked_move_targets: set[str] = set()
+        self._last_move_target: Optional[str] = None
 
     def on_start(self, state: GameState) -> None:
         self._completed_process_nodes.clear()
@@ -40,6 +41,7 @@ class DeliveryStrategy:
         self._object_busy_nodes.clear()
         self._object_busy_recover_round = 0
         self._blocked_move_targets.clear()
+        self._last_move_target = None
         return None
 
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
@@ -73,7 +75,7 @@ class DeliveryStrategy:
                 return [deliver()]
             if not player.verified:
                 next_node = self._route_policy.next_hop(state, current, gate)
-                return [move(next_node)] if next_node else []
+                return [self._move(next_node)] if next_node else []
             return []
 
         if current == gate:
@@ -82,7 +84,7 @@ class DeliveryStrategy:
                     rush_tactic = "BREAK_ORDER" if _should_bind_break_order_to_verify(state) else None
                     return [verify_gate(gate, rush_tactic=rush_tactic)]
                 return []
-            return [move(terminal)]
+            return [self._move(terminal)]
 
         process_action = self._process_action_if_needed(state, current)
         if process_action:
@@ -91,7 +93,7 @@ class DeliveryStrategy:
         mandatory_target = self._mandatory_process_target(state, current)
         if mandatory_target is not None:
             next_node = self._route_policy.next_hop(state, current, mandatory_target)
-            return [move(next_node)] if next_node else []
+            return [self._move(next_node)] if next_node else []
 
         profile_action = self._mandatory_profile_action_if_needed(state, current, gate)
         if profile_action:
@@ -111,13 +113,16 @@ class DeliveryStrategy:
         if blocking_action:
             return [blocking_action]
 
-        return [move(next_node)]
+        return [self._move(next_node)]
 
     def _decide_while_moving(
         self, state: GameState, player: Any
     ) -> list[dict[str, Any]]:
         if player.next_node_id:
-            return [move(player.next_node_id)]
+            blocking_action = self._route_edge_blocking_action_if_needed(state, player.next_node_id)
+            if blocking_action:
+                return [blocking_action]
+            return [self._move(player.next_node_id)]
 
         if player.current_node_id:
             gate = state.game_map.gate_node_id
@@ -125,9 +130,16 @@ class DeliveryStrategy:
             target = terminal if player.verified else gate
             next_node = self._route_policy.next_hop(state, player.current_node_id, target)
             if next_node:
-                return [move(next_node)]
+                blocking_action = self._route_edge_blocking_action_if_needed(state, next_node)
+                if blocking_action:
+                    return [blocking_action]
+                return [self._move(next_node)]
 
         return []
+
+    def _move(self, target_node_id: str) -> dict[str, Any]:
+        self._last_move_target = target_node_id
+        return move(target_node_id)
 
     def _process_action_if_needed(
         self, state: GameState, current: str
@@ -170,6 +182,27 @@ class DeliveryStrategy:
         if guard is not None:
             return self._enemy_guard_action(state, target_node_id, guard.defense)
 
+        return None
+
+    def _route_edge_blocking_action_if_needed(
+        self,
+        state: GameState,
+        target_node_id: str,
+    ) -> Optional[dict[str, Any]]:
+        player = state.me
+        if player is None:
+            return None
+        node = state.nodes.get(target_node_id)
+        if node is not None:
+            guard = enemy_guard_at(node, player)
+            if guard is not None:
+                return self._enemy_guard_action(state, target_node_id, guard.defense)
+            if node.has_obstacle:
+                return forced_pass(target_node_id)
+            self._blocked_move_targets.discard(target_node_id)
+            return None
+        if target_node_id in self._blocked_move_targets:
+            return forced_pass(target_node_id)
         return None
 
     def _enemy_guard_action(
@@ -215,7 +248,7 @@ class DeliveryStrategy:
                 "MOVE_BLOCKED_BY_OBSTACLE",
                 "BLOCKED",
             }:
-                target_node_id = _rejected_target_node(rejected.raw)
+                target_node_id = _rejected_target_node(rejected.raw) or self._last_move_target or ""
                 if target_node_id:
                     self._blocked_move_targets.add(target_node_id)
 
@@ -250,7 +283,7 @@ class DeliveryStrategy:
         blocking_action = self._blocking_action_if_needed(state, next_node)
         if blocking_action:
             return blocking_action
-        return move(next_node)
+        return self._move(next_node)
 
 
 def _should_bind_break_order_to_verify(state: GameState) -> bool:
