@@ -6,13 +6,21 @@ from lychee_basic_client.rules.buffs import has_move_buff
 from lychee_basic_client.strategies.context import StrategyContext
 
 
+# 同一争夺对象连续平局达到此次数后，我方放弃争夺（出 ABSTAIN），避免与对手策略相同时无限平局循环
+DRAW_LIMIT_PER_TARGET = 2
+
+
 class CombatStrategy:
     """Window, guard, forced-pass, squad, and rush-tactic decisions."""
 
     def __init__(self) -> None:
         self._logger = get_logger("strategies.combat")
+        self._draw_counts: dict[str, int] = {}
+        self._seen_contest_ids: set[str] = set()
 
     def on_start(self, state: Any) -> None:
+        self._draw_counts.clear()
+        self._seen_contest_ids.clear()
         return None
 
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
@@ -20,28 +28,59 @@ class CombatStrategy:
         player = state.me
         if player is None:
             return []
+        self._update_draw_counts(state)
         for contest in state.contests:
             if contest.get("resolved") or contest.get("status") == "SUPPRESSED":
                 continue
             if _contest_involves_player(contest, state.player_id):
+                target_node = str(contest.get("targetNodeId") or "")
                 opponent_card = _get_opponent_last_card(
                     contest, state.player_id, player.team_id
                 )
-                card = _choose_card(
-                    player.raw, contest, state.player_id, player.team_id
-                )
-                self._logger.important(
-                    "window_card round=%s contest=%s type=%s roundIndex=%s card=%s opponent_last=%s"
-                    " | 窗口出牌：本队参与窗口争夺，按规则选择本拍窗口牌（3 拍定胜负）",
-                    state.round_no,
-                    contest.get("contestId"),
-                    contest.get("contestType") or contest.get("type"),
-                    contest.get("roundIndex"),
-                    card,
-                    opponent_card,
-                )
+                if target_node and self._draw_counts.get(target_node, 0) >= DRAW_LIMIT_PER_TARGET:
+                    card = "ABSTAIN"
+                    self._logger.important(
+                        "window_card_abstain_draw_limit round=%s contest=%s node=%s draws=%s"
+                        " | 窗口出牌：同一对象连续平局达上限，放弃争夺避免无限循环",
+                        state.round_no,
+                        contest.get("contestId"),
+                        target_node,
+                        self._draw_counts.get(target_node, 0),
+                    )
+                else:
+                    card = _choose_card(
+                        player.raw, contest, state.player_id, player.team_id
+                    )
+                    self._logger.important(
+                        "window_card round=%s contest=%s type=%s roundIndex=%s card=%s opponent_last=%s"
+                        " | 窗口出牌：本队参与窗口争夺，按规则选择本拍窗口牌（3 拍定胜负）",
+                        state.round_no,
+                        contest.get("contestId"),
+                        contest.get("contestType") or contest.get("type"),
+                        contest.get("roundIndex"),
+                        card,
+                        opponent_card,
+                    )
                 return [window_card(contest["contestId"], card)]
         return []
+
+    def _update_draw_counts(self, state: Any) -> None:
+        """扫描已结算的 contest，更新各对象的连续平局计数；产生胜方时重置。"""
+        for contest in state.contests:
+            if not contest.get("resolved"):
+                continue
+            contest_id = str(contest.get("contestId") or "")
+            if not contest_id or contest_id in self._seen_contest_ids:
+                continue
+            self._seen_contest_ids.add(contest_id)
+            target_node = str(contest.get("targetNodeId") or "")
+            if not target_node:
+                continue
+            winner = str(contest.get("winnerTeamId") or "")
+            if winner == "DRAW":
+                self._draw_counts[target_node] = self._draw_counts.get(target_node, 0) + 1
+            else:
+                self._draw_counts[target_node] = 0
 
 
 def _contest_involves_player(contest: dict[str, Any], player_id: int) -> bool:

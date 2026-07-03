@@ -87,7 +87,7 @@ def speed_priority_task_target_allowed(
         state,
         current_node_id,
         extra_rounds=process_round,
-        buffer_rounds=WUGUAN_RACE_BUFFER_ROUNDS,
+        buffer_rounds=_wuguan_race_buffer_rounds(process_round),
     )
 
 
@@ -106,8 +106,17 @@ def speed_priority_claim_current_task_allowed(
         state,
         current_node_id,
         extra_rounds=process_round,
-        buffer_rounds=WUGUAN_RACE_BUFFER_ROUNDS,
+        buffer_rounds=_wuguan_race_buffer_rounds(process_round),
     )
+
+
+def _wuguan_race_buffer_rounds(process_round: int) -> int:
+    """快任务（≤3 帧处理）降低缓冲，更容易接取；慢任务保持保守。"""
+    if process_round <= 3:
+        return 3
+    if process_round <= 4:
+        return 5
+    return WUGUAN_RACE_BUFFER_ROUNDS
 
 
 def can_spend_before_wuguan(
