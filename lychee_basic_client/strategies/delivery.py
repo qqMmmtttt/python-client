@@ -155,15 +155,25 @@ class DeliveryStrategy:
                     return [self._move(recovery_target)]
 
                 if player.next_node_id != recovery_target:
+                    if _should_hold_route_edge_for_squad(state):
+                        self._logger.important(
+                            "guard_blocked_route_edge_hold round=%s state=%s from=%s blocked=%s current_next=%s action=WAIT",
+                            state.round_no,
+                            player.state,
+                            player.current_node_id,
+                            recovery_target,
+                            player.next_node_id,
+                        )
+                        return [wait()]
                     self._logger.important(
-                        "guard_blocked_route_edge_hold round=%s state=%s from=%s blocked=%s current_next=%s action=WAIT",
+                        "guard_blocked_route_edge_continue_pivot round=%s state=%s from=%s blocked=%s current_next=%s reason=no_squad",
                         state.round_no,
                         player.state,
                         player.current_node_id,
                         recovery_target,
                         player.next_node_id,
                     )
-                    return [wait()]
+                    return [self._move(player.next_node_id)]
 
                 pivot_target = self._route_edge_reset_pivot_target(
                     state,
@@ -247,7 +257,7 @@ class DeliveryStrategy:
         state: GameState,
         current_node_id: str,
     ) -> Optional["_BlockingDecision"]:
-        for target_node_id in sorted(self._guard_blocked_move_targets):
+        for target_node_id in self._adjacent_guard_targets(state, current_node_id):
             if target_node_id not in state.game_map.neighbors(current_node_id):
                 continue
             decision = self._blocking_decision_if_needed(state, target_node_id)
@@ -262,6 +272,25 @@ class DeliveryStrategy:
             )
             return decision
         return None
+
+    def _adjacent_guard_targets(
+        self,
+        state: GameState,
+        current_node_id: str,
+    ) -> list[str]:
+        candidates = set(self._guard_blocked_move_targets)
+        delivery_target = (
+            state.game_map.terminal_node_ids[0]
+            if state.me and state.me.verified
+            else state.game_map.gate_node_id
+        )
+        path = state.game_map.fastest_path(current_node_id, delivery_target)
+        if len(path) >= 2:
+            next_node_id = path[1]
+            if enemy_guard_at(state.nodes.get(next_node_id), state.me) is not None:
+                candidates.add(next_node_id)
+                self._guard_blocked_move_targets.add(next_node_id)
+        return sorted(candidates)
 
     def _route_edge_guard_recovery_target(
         self,
@@ -646,6 +675,13 @@ def _should_hold_for_squad_weaken(state: GameState, defense: int) -> bool:
     if player.squad_available >= 2:
         return True
     return _squad_in_flight(player) > 0
+
+
+def _should_hold_route_edge_for_squad(state: GameState) -> bool:
+    player = state.me
+    if player is None or state.phase == "RUSH":
+        return False
+    return player.squad_available >= 2 or _squad_in_flight(player) > 0
 
 
 def _squad_in_flight(player: Any) -> int:

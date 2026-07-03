@@ -24,6 +24,8 @@ def _state(
     task_score: int = 0,
     good_fruit: int = 100,
     bad_fruit: int = 0,
+    squad_available: int = 0,
+    squad_in_flight: int = 0,
     tasks: Optional[list[dict[str, Any]]] = None,
     nodes: Optional[list[dict[str, Any]]] = None,
     events: Optional[list[dict[str, Any]]] = None,
@@ -48,6 +50,8 @@ def _state(
                     "badFruit": bad_fruit,
                     "freshness": 90,
                     "taskScore": task_score,
+                    "squadAvailable": squad_available,
+                    "squadInFlight": squad_in_flight,
                     "resources": {},
                 }
             ],
@@ -70,6 +74,8 @@ def _state(
                     "badFruit": bad_fruit,
                     "freshness": 90,
                     "taskScore": task_score,
+                    "squadAvailable": squad_available,
+                    "squadInFlight": squad_in_flight,
                     "resources": {},
                 }
             ],
@@ -476,6 +482,7 @@ class TaskPlanningTests(unittest.TestCase):
             "S09",
             player_state="MOVING",
             next_node_id="S07",
+            squad_in_flight=2,
             nodes=[
                 {
                     "nodeId": "S10",
@@ -519,6 +526,7 @@ class TaskPlanningTests(unittest.TestCase):
             "S09",
             player_state="MOVING",
             next_node_id="S07",
+            squad_in_flight=2,
             nodes=[
                 {
                     "nodeId": "S10",
@@ -532,6 +540,74 @@ class TaskPlanningTests(unittest.TestCase):
         self.assertEqual(
             [{"action": "WAIT"}],
             strategy.decide(StrategyContext.from_state(pivot_edge)),
+        )
+
+    def test_delivery_continues_to_pivot_node_when_no_squad_can_clear_guard(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        strategy.on_start(_state("S09"))
+        strategy.decide(
+            StrategyContext.from_state(
+                _state(
+                    "S09",
+                    player_state="MOVING",
+                    next_node_id="S10",
+                    nodes=[
+                        {
+                            "nodeId": "S10",
+                            "hasObstacle": False,
+                            "resourceStock": {},
+                            "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                        }
+                    ],
+                )
+            )
+        )
+
+        pivot_edge = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S07",
+            squad_available=0,
+            squad_in_flight=0,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S07"}],
+            strategy.decide(StrategyContext.from_state(pivot_edge)),
+        )
+
+    def test_delivery_breaks_adjacent_observed_guard_from_s09_node_without_squad(self) -> None:
+        strategy = DeliveryStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        state = _state(
+            "S09",
+            bad_fruit=1,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "BREAK_GUARD", "targetNodeId": "S10", "goodFruit": 2, "badFruit": 1}],
+            strategy.decide(StrategyContext.from_state(state)),
         )
 
     def test_delivery_resumes_blocked_target_after_route_edge_guard_is_cleared(self) -> None:
