@@ -8,6 +8,7 @@ from lychee_basic_client.rules.blocking import enemy_guard_at
 from lychee_basic_client.rules.buffs import has_move_buff
 from lychee_basic_client.rules.states import NODE_BUSY_STATES, ROUTE_EDGE_STATES
 from lychee_basic_client.strategies.context import StrategyContext
+from lychee_basic_client.strategies.speed_priority import should_prioritize_wuguan
 
 USEFUL_PICKUPS = (
     "ICE_BOX",
@@ -44,7 +45,8 @@ RESOURCE_PICKUP_MARGIN = {
 class ResourceStrategy:
     """Resource pickup and inventory-use decisions."""
 
-    def __init__(self) -> None:
+    def __init__(self, route_policy: Any = None) -> None:
+        self._route_policy = route_policy
         self._attempted_pickups: set[tuple[str, str]] = set()
         self._used_intel_targets: set[str] = set()
         self._logger = get_logger("strategies.resources")
@@ -63,7 +65,11 @@ class ResourceStrategy:
         if player.state in ROUTE_EDGE_STATES:
             if _has_adjacent_route_edge_guard(state, player):
                 return []
-            return _horse_action_if_useful(state, player)
+            return _horse_action_if_useful(
+                state,
+                player,
+                hold_for_t06=not _speed_priority_race(state, player, self._route_policy),
+            )
 
         if player.state != "IDLE":
             return []
@@ -86,7 +92,24 @@ class ResourceStrategy:
             )
             return [use_resource("ICE_BOX")]
 
-        if not _has_active_task_at_current_node(state, player.current_node_id):
+        speed_race = _speed_priority_race(state, player, self._route_policy)
+
+        horse_action = (
+            []
+            if _is_unprocessed_transfer_node(state)
+            else _horse_action_if_useful(state, player, hold_for_t06=not speed_race)
+        )
+        if speed_race and horse_action:
+            self._logger.important(
+                "use_horse_speed_priority round=%s node=%s resource=%s"
+                " | 速度优先：武关竞速段立即使用马类资源，优先压缩到达 S10 的时间",
+                state.round_no,
+                player.current_node_id,
+                horse_action[0].get("resourceType"),
+            )
+            return horse_action
+
+        if not speed_race and not _has_active_task_at_current_node(state, player.current_node_id):
             intel_action = _intel_action_if_useful(context, player, self._used_intel_targets)
             if intel_action:
                 self._logger.important(
@@ -97,7 +120,6 @@ class ResourceStrategy:
                 )
                 return intel_action
 
-        horse_action = [] if _is_unprocessed_transfer_node(state) else _horse_action_if_useful(state, player)
         if horse_action:
             self._logger.important(
                 "use_horse round=%s node=%s resource=%s | 使用马类资源：提升基础每帧移动量加速路线移动（快马 1200 / 短程马 1150）",
@@ -122,7 +144,12 @@ class ResourceStrategy:
                     if (
                         node.resource_stock.get(resource_type, 0) > 0
                         and key not in self._attempted_pickups
-                        and _should_claim_resource(state, player, resource_type)
+                        and _should_claim_resource(
+                            state,
+                            player,
+                            resource_type,
+                            speed_race=speed_race,
+                        )
                     ):
                         self._attempted_pickups.add(key)
                         self._logger.important(
@@ -136,9 +163,15 @@ class ResourceStrategy:
         return []
 
 
-def _horse_action_if_useful(state: Any, player: Any) -> list[dict[str, Any]]:
+def _horse_action_if_useful(
+    state: Any,
+    player: Any,
+    *,
+    hold_for_t06: bool = True,
+) -> list[dict[str, Any]]:
     hold_horse_for_t06 = (
-        state.round_no < TASK_CUTOFF_ROUND
+        hold_for_t06
+        and state.round_no < TASK_CUTOFF_ROUND
         and player.task_score < TASK_SCORE_GOAL
         and _has_active_t06(state)
     )
@@ -186,8 +219,18 @@ def _ice_box_threshold(state: Any) -> float:
     return 72
 
 
-def _should_claim_resource(state: Any, player: Any, resource_type: str) -> bool:
+def _should_claim_resource(
+    state: Any,
+    player: Any,
+    resource_type: str,
+    *,
+    speed_race: bool = False,
+) -> bool:
     if player.resources.get(resource_type, 0) >= RESOURCE_TARGET_STOCK.get(resource_type, 1):
+        return False
+    if speed_race and resource_type not in {"FAST_HORSE", "SHORT_HORSE", "ICE_BOX"}:
+        return False
+    if speed_race and resource_type == "ICE_BOX" and player.freshness >= 82 and not state.weather.has_active("HOT"):
         return False
     if resource_type == "BOAT_RIGHT" and player.current_node_id != "S04":
         return False
@@ -297,6 +340,13 @@ def _is_unprocessed_transfer_node(state: Any) -> bool:
         return False
     process_node = state.game_map.process_node(player.current_node_id)
     return process_node is not None and process_node.process_type != "VERIFY"
+
+
+def _speed_priority_race(state: Any, player: Any, route_policy: Any) -> bool:
+    return bool(
+        player.current_node_id
+        and should_prioritize_wuguan(route_policy, state, player.current_node_id)
+    )
 
 
 def _delivery_still_safe(state: Any, current_node_id: str, margin: int) -> bool:

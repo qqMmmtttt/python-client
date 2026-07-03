@@ -228,6 +228,37 @@ class DeliveryStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(completed)),
         )
 
+    def test_speed_priority_profile_continues_from_dock_to_water_station(self) -> None:
+        strategy = self._strategy(route_profile="speed-priority")
+        state = _state("S04")
+        strategy.on_start(state)
+        strategy.decide(StrategyContext.from_state(state))
+
+        completed = _state(
+            "S04",
+            tasks=[
+                {
+                    "taskId": "task-s07",
+                    "taskTemplateId": "T02",
+                    "nodeId": "S07",
+                    "score": 30,
+                    "active": True,
+                    "processRound": 4,
+                }
+            ],
+            events=[
+                {
+                    "type": "PROCESS_COMPLETE",
+                    "payload": {"playerId": 1001, "targetNodeId": "S04"},
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S05"}],
+            strategy.decide(StrategyContext.from_state(completed)),
+        )
+
     def test_board_station_uses_process_action(self) -> None:
         strategy = self._strategy()
         state = _state("S04")

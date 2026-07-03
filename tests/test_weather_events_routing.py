@@ -82,6 +82,12 @@ class WeatherEventsRoutingTests(unittest.TestCase):
 
         self.assertEqual("S04", policy.next_hop(state, "S02", "S14"))
 
+    def test_speed_priority_profile_keeps_water_race_even_in_heavy_rain(self) -> None:
+        state = _real_map_state("S02", weather={"active": [{"type": "HEAVY_RAIN"}]})
+        policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+
+        self.assertEqual("S04", policy.next_hop(state, "S02", "S14"))
+
     def test_auto_route_can_switch_to_land_in_heavy_rain(self) -> None:
         state = _real_map_state("S02", weather={"active": [{"type": "HEAVY_RAIN"}]})
         policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="auto"))

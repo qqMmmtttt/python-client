@@ -29,6 +29,9 @@ from lychee_basic_client.strategies.route_edge_guard import (
     plan_route_edge_guard_recovery,
 )
 from lychee_basic_client.strategies.routing import RoutePolicy
+from lychee_basic_client.strategies.speed_priority import (
+    speed_priority_task_target_allowed,
+)
 
 
 class DeliveryStrategy:
@@ -149,6 +152,21 @@ class DeliveryStrategy:
             return [adjacent_guard_decision.action] if adjacent_guard_decision.action else []
 
         task_target = select_task_target(state, current, self._rejected_task_ids)
+        if task_target is not None and not speed_priority_task_target_allowed(
+            self._route_policy,
+            state,
+            current,
+            task_target,
+        ):
+            self._logger.important(
+                "task_target_skip_speed_priority round=%s current=%s task=%s stand=%s"
+                " | 速度优先：武关竞速段不为该任务离开水路主线或消耗领先窗口，先保证到达 S10 武关",
+                state.round_no,
+                current,
+                task_target.task_id,
+                task_target.stand_node_id,
+            )
+            task_target = None
         if task_target is not None and task_target.stand_node_id == current:
             return [claim_task(task_target.task_id)]
         target = task_target.stand_node_id if task_target is not None else gate

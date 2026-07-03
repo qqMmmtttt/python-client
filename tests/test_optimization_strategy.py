@@ -11,6 +11,7 @@ from lychee_basic_client.observability.logging_setup import setup_logging
 from lychee_basic_client.strategies.factory import build_strategy
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.resources import ResourceStrategy
+from lychee_basic_client.strategies.routing import RoutePolicy
 from lychee_basic_client.strategies.squad import SquadStrategy
 
 
@@ -37,6 +38,7 @@ def _state(
     resources: Optional[dict[str, int]] = None,
     squad_available: int = 8,
     nodes: Optional[list[dict[str, Any]]] = None,
+    tasks: Optional[list[dict[str, Any]]] = None,
     events: Optional[list[dict[str, Any]]] = None,
     weather: Optional[dict[str, Any]] = None,
     extra_players: Optional[list[dict[str, Any]]] = None,
@@ -78,7 +80,7 @@ def _state(
             "phase": phase,
             "players": players,
             "nodes": nodes or [],
-            "tasks": [],
+            "tasks": tasks or [],
             "events": events or [],
             "weather": weather or {},
             "contests": [],
@@ -143,6 +145,57 @@ class OptimizationStrategyTests(unittest.TestCase):
             ResourceStrategy().decide(StrategyContext.from_state(state)),
         )
 
+    def test_speed_priority_claims_short_horse_on_water_route(self) -> None:
+        state = _state(
+            "S04",
+            nodes=[{"nodeId": "S04", "resourceStock": {"SHORT_HORSE": 1}}],
+        )
+        strategy = ResourceStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+
+        self.assertEqual(
+            [{"action": "CLAIM_RESOURCE", "targetNodeId": "S04", "resourceType": "SHORT_HORSE"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_speed_priority_skips_boat_right_before_wuguan(self) -> None:
+        state = _state(
+            "S04",
+            nodes=[{"nodeId": "S04", "resourceStock": {"BOAT_RIGHT": 1}}],
+        )
+        strategy = ResourceStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
+
+    def test_speed_priority_uses_horse_even_when_t06_exists(self) -> None:
+        state = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S10",
+            resources={"FAST_HORSE": 1},
+            tasks=[
+                {
+                    "taskId": "task-t06",
+                    "taskTemplateId": "T06",
+                    "nodeId": "S09",
+                    "score": 30,
+                    "active": True,
+                }
+            ],
+            nodes=[{"nodeId": "S10", "resourceStock": {}}],
+        )
+        strategy = ResourceStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+
+        self.assertEqual(
+            [{"action": "USE_RESOURCE", "resourceType": "FAST_HORSE"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
     def test_squad_strategy_reserves_initial_team_for_key_pass_guards(self) -> None:
         strategy = SquadStrategy()
         state = _state("S01")
@@ -169,6 +222,18 @@ class OptimizationStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
+
+    def test_speed_priority_squad_scouts_while_preserving_guard_reserve(self) -> None:
+        strategy = SquadStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        state = _state("S01", squad_available=8)
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SQUAD_SCOUT", "targetNodeId": "S04"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
 
     def test_squad_strategy_weakens_route_edge_enemy_guard_before_scouting(self) -> None:
         strategy = SquadStrategy()
@@ -595,7 +660,7 @@ class OptimizationStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 0}],
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 1}],
             strategy.decide(state),
         )
 
@@ -647,7 +712,7 @@ class OptimizationStrategyTests(unittest.TestCase):
             strategy.decide(state),
         )
 
-    def test_pipeline_avoids_guard_when_far_ahead_on_score(self) -> None:
+    def test_speed_priority_sets_wuguan_guard_even_when_far_ahead_on_score(self) -> None:
         state = _state(
             "S10",
             round_no=260,
@@ -669,11 +734,11 @@ class OptimizationStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S11"}],
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 1}],
             strategy.decide(state),
         )
 
-    def test_pipeline_waits_to_guard_until_task_threshold(self) -> None:
+    def test_speed_priority_sets_wuguan_guard_before_task_threshold(self) -> None:
         state = _state(
             "S10",
             round_no=260,
@@ -693,7 +758,7 @@ class OptimizationStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "MOVE", "targetNodeId": "S11"}],
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 1}],
             strategy.decide(state),
         )
 

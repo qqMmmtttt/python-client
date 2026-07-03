@@ -11,7 +11,7 @@ class Config:
     version: str
     log_dir: str = "logs"
     log_level: str = "INFO"
-    route_profile: str = "auto"
+    route_profile: str = "speed-priority"
 
 
 def parse_args() -> Config:
@@ -29,11 +29,12 @@ def parse_args() -> Config:
     )
     parser.add_argument(
         "--route-profile",
-        choices=["auto", "first-round-water", "first-round-safe", "generic"],
-        default="auto",
+        choices=["speed-priority", "auto", "first-round-water", "first-round-safe", "generic"],
+        default="speed-priority",
         help=(
-            "Route policy profile. auto uses dynamic routing with weather, process, "
-            "obstacle, residue and guard costs. first-round-water forces the known water route."
+            "Route policy profile. speed-priority forces the first-round water race to Wuguan; "
+            "auto uses dynamic routing with weather, process, obstacle, residue and guard costs. "
+            "first-round-water forces the known water route."
         ),
     )
     args = parser.parse_args()

@@ -7,6 +7,7 @@ from lychee_basic_client.rules.states import ROUTE_EDGE_STATES
 from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.routing import RoutePolicy
+from lychee_basic_client.strategies.speed_priority import route_policy_is_speed_priority
 
 
 SCOUT_TARGETS = ("S04", "S05", "S11", "S13", "S14")
@@ -237,6 +238,8 @@ def _squad_guard_reserve(
         if cap <= 0:
             continue
         reserve = max(reserve, _squad_people_to_remove_guard(cap))
+    if route_policy_is_speed_priority(route_policy):
+        return min(4, reserve)
     return min(8, reserve)
 
 

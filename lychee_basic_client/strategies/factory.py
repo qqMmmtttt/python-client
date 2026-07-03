@@ -17,10 +17,10 @@ def build_strategy(config: Config) -> StrategyPipeline:
         [
             CombatStrategy(),
             SquadStrategy(route_policy),
-            TaskStrategy(),
-            ResourceStrategy(),
+            TaskStrategy(route_policy),
+            ResourceStrategy(route_policy),
             RushStrategy(),
-            GuardStrategy(),
+            GuardStrategy(route_policy),
             DeliveryStrategy(route_policy),
         ]
     )

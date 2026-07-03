@@ -7,6 +7,13 @@ from lychee_basic_client.planning.tasks import TASK_SCORE_GOAL
 from lychee_basic_client.protocol.actions import set_guard
 from lychee_basic_client.rules.blocking import enemy_guard_at
 from lychee_basic_client.strategies.context import StrategyContext
+from lychee_basic_client.strategies.speed_priority import (
+    WUGUAN_GUARD_MIN_OPPONENT_ETA,
+    WUGUAN_NODE_ID,
+    opponent_eta_to_wuguan,
+    route_policy_is_speed_priority,
+    wuguan_guard_extra_good_fruit,
+)
 
 
 KEY_GUARD_NODES = {
@@ -30,7 +37,8 @@ MAX_ACTIVE_OWN_GUARDS = 2
 class GuardStrategy:
     """Conservative guard placement after the scoring base is safe."""
 
-    def __init__(self) -> None:
+    def __init__(self, route_policy: Any = None) -> None:
+        self._route_policy = route_policy
         self._attempted_nodes: set[str] = set()
         self._logger = get_logger("strategies.guard")
 
@@ -49,10 +57,6 @@ class GuardStrategy:
         current = player.current_node_id
         if not current or current in self._attempted_nodes:
             return []
-        if player.task_score < TASK_SCORE_GOAL:
-            return []
-        if state.round_no >= 420:
-            return []
         if _active_own_guard_count(state, player) >= MAX_ACTIVE_OWN_GUARDS:
             return []
 
@@ -60,6 +64,16 @@ class GuardStrategy:
         if node is None:
             return []
         if _has_active_guard(node) or enemy_guard_at(node, player) is not None:
+            return []
+
+        speed_guard = self._speed_priority_wuguan_guard(state, player, current)
+        if speed_guard is not None:
+            self._attempted_nodes.add(current)
+            return [speed_guard]
+
+        if player.task_score < TASK_SCORE_GOAL:
+            return []
+        if state.round_no >= 420:
             return []
 
         candidate_score = _guard_candidate_score(state, current)
@@ -85,6 +99,39 @@ class GuardStrategy:
             candidate_score,
         )
         return [set_guard(current, extra_good_fruit=extra_good_fruit)]
+
+    def _speed_priority_wuguan_guard(
+        self,
+        state: GameState,
+        player: PlayerState,
+        current: str,
+    ) -> Optional[dict[str, Any]]:
+        if not route_policy_is_speed_priority(self._route_policy):
+            return None
+        if current != WUGUAN_NODE_ID:
+            return None
+        if state.round_no >= 360:
+            return None
+        if not _delivery_has_guard_slack(state, player, current):
+            return None
+        if not _opponent_will_need_node(state, player, current):
+            return None
+        opponent_eta = opponent_eta_to_wuguan(state, player)
+        if opponent_eta is None or opponent_eta < WUGUAN_GUARD_MIN_OPPONENT_ETA:
+            return None
+        extra_good_fruit = wuguan_guard_extra_good_fruit(state, player)
+        if player.good_fruit <= _base_guard_cost(state, current) + extra_good_fruit + 12:
+            return None
+        self._logger.important(
+            "set_guard_speed_priority round=%s node=%s opponent_eta=%s extra_good=%s good=%s"
+            " | 速度优先：我方已先到武关，且对手到达武关仍有足够距离，立即设卡拖慢对方入关节奏",
+            state.round_no,
+            current,
+            opponent_eta,
+            extra_good_fruit,
+            player.good_fruit,
+        )
+        return set_guard(current, extra_good_fruit=extra_good_fruit)
 
 
 def _delivery_has_guard_slack(state: GameState, player: PlayerState, current: str) -> bool:

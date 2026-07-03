@@ -6,6 +6,7 @@ from lychee_basic_client.models.map import Edge, GameMap
 from lychee_basic_client.models.state import GameState
 from lychee_basic_client.planning.route_profiles import FIRST_ROUND_WATER_ROUTE
 from lychee_basic_client.rules.blocking import enemy_guard_at, obstacle_residue_tax_round
+from lychee_basic_client.strategies.speed_priority import SPEED_PRIORITY_PROFILE
 
 
 class RoutePolicy:
@@ -29,6 +30,9 @@ class RoutePolicy:
     ) -> Optional[str]:
         return self._profile_next_hop(state.game_map, current, target)
 
+    def is_speed_priority(self) -> bool:
+        return self._profile_name == SPEED_PRIORITY_PROFILE
+
     def _profile_next_hop(
         self, game_map: GameMap, current: str, target: str
     ) -> Optional[str]:
@@ -44,7 +48,7 @@ class RoutePolicy:
             return []
         if self._profile_name == "auto":
             return []
-        if self._profile_name in {"first-round-safe", "first-round-water"}:
+        if self._profile_name in {"first-round-safe", "first-round-water", SPEED_PRIORITY_PROFILE}:
             return _profile_path(game_map, FIRST_ROUND_WATER_ROUTE, current, target)
         return []
 
