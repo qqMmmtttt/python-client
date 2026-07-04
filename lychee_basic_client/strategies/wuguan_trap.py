@@ -17,7 +17,6 @@ from lychee_basic_client.rules.guards import (
     has_own_active_guard,
     max_effective_extra_good_fruit,
 )
-from lychee_basic_client.rules.states import ROUTE_EDGE_STATES
 
 
 LUOYANG_NODE_ID = "S09"
@@ -36,13 +35,20 @@ class WuguanTrapDecision:
     stage: str
 
 
+@dataclass(frozen=True)
+class WuguanApproachStatus:
+    should_set_guard: bool
+    reason: str
+    wait_detail: str = ""
+
+
 class WuguanTrapGuardPlan:
     """洛阳驿 + 武关双段设卡局部策略。
 
     目标流程：
     1. 我方先到 S09 洛阳驿，且对手还没到洛阳时，最大投入在 S09 设卡。
-    2. 我方抵达 S10 武关后，不立刻设卡；等待对手离开 S09 朝 S10 前进。
-    3. 对手进入 S09->S10 路线边后，我方最大投入在 S10 设卡，然后交回主线去终点。
+    2. 我方抵达 S10 武关后，不立刻设卡；等待对手进入武关前置触发区。
+    3. 对手从 S09 直奔 S10，或经 S08 秦岭栈道接近 S10 时，最大投入在 S10 设卡。
     """
 
     def __init__(self) -> None:
@@ -174,7 +180,7 @@ class WuguanTrapGuardPlan:
             self._log("武关设卡跳过", state, player, "己方有效设卡已达到 2 个上限")
             return None
 
-        moving_from_luoyang = opponent_moving_from_luoyang_to_wuguan(state, player)
+        approach_status = opponent_wuguan_approach_status(state, player)
         opponent_eta = opponent_eta_to_node(state, player, WUGUAN_NODE_ID)
         force_set_round = _wuguan_force_set_round(state, player)
         if (
@@ -194,20 +200,29 @@ class WuguanTrapGuardPlan:
                 allow_close_opponent=True,
             )
         should_fallback_set = self._should_fallback_set_wuguan(state, player, opponent_eta)
-        if moving_from_luoyang or should_fallback_set:
+        if approach_status.should_set_guard or should_fallback_set:
             return self._set_wuguan_guard(
                 state,
                 player,
                 opponent_eta=opponent_eta,
-                reason="对手已离开洛阳驿朝武关前进" if moving_from_luoyang else "未形成洛阳阶段，直接补武关设卡",
+                reason=approach_status.reason if approach_status.should_set_guard else "未形成洛阳阶段，直接补武关设卡",
             )
 
         if self._luoyang_guard_submitted or self._luoyang_guard_seen_active:
+            if opponent_eta is None:
+                self._log(
+                    "武关等待结束",
+                    state,
+                    player,
+                    "未发现仍需经过武关的对手，停止等待并转入终点主线",
+                )
+                return None
+            wait_detail = approach_status.wait_detail or "等待对手从 S09 朝 S10 或 S08 方向继续推进"
             self._log(
                 "武关等待",
                 state,
                 player,
-                f"洛阳阶段已启动；等待对手从 S09 朝 S10 出发，当前对手到 S10 ETA={opponent_eta}，"
+                f"洛阳阶段已启动；{wait_detail}，当前对手到 S10 ETA={opponent_eta}，"
                 f"武关设卡截止轮={force_set_round}",
             )
             return WuguanTrapDecision(action=wait(), stage="wuguan_hold")
@@ -307,14 +322,38 @@ class WuguanTrapGuardPlan:
         )
 
 
-def opponent_moving_from_luoyang_to_wuguan(state: GameState, player: PlayerState) -> bool:
+def opponent_wuguan_approach_status(
+    state: GameState,
+    player: PlayerState,
+) -> WuguanApproachStatus:
     for other in state.players.values():
         if _is_own_player(other, player):
             continue
-        if other.current_node_id == LUOYANG_NODE_ID and other.next_node_id == WUGUAN_NODE_ID:
-            if other.state in ROUTE_EDGE_STATES or other.next_node_id:
-                return True
-    return False
+        current = other.current_node_id or ""
+        next_node = other.next_node_id or ""
+        if current == WUGUAN_NODE_ID:
+            continue
+        if next_node == WUGUAN_NODE_ID and _opponent_will_enter_wuguan(state, other, current):
+            return WuguanApproachStatus(
+                should_set_guard=True,
+                reason=f"对手 {other.player_id} 已从 {current} 朝武关移动",
+            )
+        if _is_wuguan_entry_staging_node(state, other, current):
+            return WuguanApproachStatus(
+                should_set_guard=True,
+                reason=f"对手 {other.player_id} 已到武关前置节点 {current}",
+            )
+        if current == LUOYANG_NODE_ID and next_node and _path_from_node_reaches_wuguan(state, other, next_node):
+            return WuguanApproachStatus(
+                should_set_guard=False,
+                reason="",
+                wait_detail=f"识别到对手 {other.player_id} 从洛阳改道 {next_node}，等待其到达武关前置节点",
+            )
+    return WuguanApproachStatus(
+        should_set_guard=False,
+        reason="",
+        wait_detail="等待对手进入武关前置路径",
+    )
 
 
 def opponent_eta_to_node(
@@ -355,6 +394,42 @@ def _player_eta_to_node(
     if target_node_id not in path:
         return None
     return estimate_path_rounds(state, path[: path.index(target_node_id) + 1], include_process=True)
+
+
+def _opponent_will_enter_wuguan(
+    state: GameState,
+    player: PlayerState,
+    current_node_id: str,
+) -> bool:
+    if not current_node_id:
+        return False
+    if WUGUAN_NODE_ID not in state.game_map.neighbors(current_node_id):
+        return False
+    return _path_from_node_reaches_wuguan(state, player, current_node_id)
+
+
+def _is_wuguan_entry_staging_node(
+    state: GameState,
+    player: PlayerState,
+    current_node_id: str,
+) -> bool:
+    if not current_node_id or current_node_id == LUOYANG_NODE_ID:
+        return False
+    if WUGUAN_NODE_ID not in state.game_map.neighbors(current_node_id):
+        return False
+    return _path_from_node_reaches_wuguan(state, player, current_node_id)
+
+
+def _path_from_node_reaches_wuguan(
+    state: GameState,
+    player: PlayerState,
+    node_id: str,
+) -> bool:
+    if not node_id:
+        return False
+    target = state.game_map.terminal_node_ids[0] if player.verified else state.game_map.gate_node_id
+    path = state.game_map.fastest_path(node_id, target)
+    return WUGUAN_NODE_ID in path[1:]
 
 
 def _is_own_player(other: PlayerState, player: PlayerState) -> bool:

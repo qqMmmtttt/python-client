@@ -1,8 +1,9 @@
 import math
 from typing import Any, Optional
 
-from lychee_basic_client.protocol.actions import squad_clear, squad_scout, squad_weaken
+from lychee_basic_client.protocol.actions import squad_clear, squad_reinforce, squad_scout, squad_weaken
 from lychee_basic_client.rules.blocking import enemy_guard_at
+from lychee_basic_client.rules.guards import guard_max_defense, has_own_active_guard
 from lychee_basic_client.rules.states import ROUTE_EDGE_STATES
 from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.strategies.context import StrategyContext
@@ -18,26 +19,39 @@ CRITICAL_GUARD_CAPS = {
 }
 SQUAD_WEAKEN_COST = 2
 SQUAD_WEAKEN_VALUE = 2
+SQUAD_REINFORCE_COST = 2
+SQUAD_REINFORCE_VALUE = 2
+OWN_GUARD_PRIORITY = {
+    "S10": 120,
+    "S09": 110,
+    "S11": 92,
+    "S14": 88,
+}
 
 
 class SquadStrategy:
-    """小分队策略：产出可与主车队并行动作的探路、清障和削弱设卡决策。"""
+    """小分队策略：产出可与主车队并行的探路、清障、增援和削弱决策。"""
 
     def __init__(self, route_policy: Optional[RoutePolicy] = None) -> None:
         self._route_policy = route_policy
         self._logger = get_logger("strategies.squad")
         self._dispatched_scout_targets: set[str] = set()
         self._dispatched_clear_targets: set[str] = set()
+        self._pending_reinforce_counts: dict[str, int] = {}
         self._pending_weaken_counts: dict[str, int] = {}
+        self._last_reinforce_target = ""
 
     def on_start(self, state: Any) -> None:
         self._dispatched_scout_targets.clear()
         self._dispatched_clear_targets.clear()
+        self._pending_reinforce_counts.clear()
         self._pending_weaken_counts.clear()
+        self._last_reinforce_target = ""
         return None
 
     def decide(self, context: StrategyContext) -> list[dict[str, Any]]:
         state = context.state
+        self._observe_reinforce_results(context)
         player = state.me
         if player is None or player.delivered:
             return []
@@ -61,6 +75,31 @@ class SquadStrategy:
                 self._pending_weaken_counts[weaken_target],
             )
             return [squad_weaken(weaken_target)]
+
+        # 己方设卡已经生效后，小分队优先把关键关卡补到防守上限。
+        reinforce_target = _reinforce_target_for_own_guard(
+            context,
+            self._pending_reinforce_counts,
+        )
+        if reinforce_target and player.squad_available >= SQUAD_REINFORCE_COST:
+            self._pending_reinforce_counts[reinforce_target] = (
+                self._pending_reinforce_counts.get(reinforce_target, 0) + 1
+            )
+            self._last_reinforce_target = reinforce_target
+            node = state.nodes.get(reinforce_target)
+            guard = (node.guard if node else None) or {}
+            self._logger.important(
+                "squad_reinforce_dispatch round=%s target=%s available=%s reserve=%s defense=%s max=%s pending=%s"
+                " | 小分队增援：派出小分队加强己方有效设卡（消耗 2 人手，目标防守值 +2，不超过上限）",
+                state.round_no,
+                reinforce_target,
+                player.squad_available,
+                reserve,
+                guard.get("defense"),
+                _guard_max_defense(state, reinforce_target, guard),
+                self._pending_reinforce_counts[reinforce_target],
+            )
+            return [squad_reinforce(reinforce_target)]
 
         # 普通道路障碍可提前派小分队清理，但不能动用预留给关键关卡的人手。
         clear_target = _clear_target_on_route(context, self._dispatched_clear_targets, self._route_policy)
@@ -106,6 +145,37 @@ class SquadStrategy:
             )
             return [squad_scout(target)]
         return []
+
+    def _observe_reinforce_results(self, context: StrategyContext) -> None:
+        state = context.state
+        for event in state.events:
+            event_type = event.get("type")
+            payload = event.get("payload") or {}
+            if payload.get("playerId") not in (None, state.player_id):
+                continue
+            if event_type in {"ACTION_REJECTED", "INVALID_ACTION"} and payload.get("action") == "SQUAD_REINFORCE":
+                target = str(payload.get("targetNodeId") or self._last_reinforce_target)
+                if target:
+                    self._pending_reinforce_counts.pop(target, None)
+                continue
+            if event_type == "SQUAD_FAILED" and payload.get("action") != "SQUAD_REINFORCE":
+                continue
+            if event_type not in {"SQUAD_REINFORCE", "SQUAD_FAILED"}:
+                continue
+            target = str(payload.get("targetNodeId") or payload.get("nodeId") or "")
+            if target:
+                self._pending_reinforce_counts.pop(target, None)
+
+        for result in state.action_results:
+            if result.get("playerId") != state.player_id:
+                continue
+            if result.get("action") != "SQUAD_REINFORCE":
+                continue
+            if result.get("accepted", True):
+                continue
+            target = str(result.get("targetNodeId") or self._last_reinforce_target)
+            if target:
+                self._pending_reinforce_counts.pop(target, None)
 
 
 def _clear_target_on_route(
@@ -198,6 +268,71 @@ def _should_dispatch_weaken(
     if _direct_break_can_clear(player, defense):
         return False
     return defense - pending * SQUAD_WEAKEN_VALUE > _max_direct_break_attack(player)
+
+
+def _reinforce_target_for_own_guard(
+    context: StrategyContext,
+    pending_reinforce_counts: dict[str, int],
+) -> str:
+    state = context.state
+    player = state.me
+    if player is None:
+        return ""
+
+    candidates: list[tuple[int, str]] = []
+    for node_id, node in state.nodes.items():
+        if not has_own_active_guard(node, player):
+            pending_reinforce_counts.pop(node_id, None)
+            continue
+        guard = node.guard or {}
+        defense = int(guard.get("defense") or 0)
+        max_defense = _guard_max_defense(state, node_id, guard)
+        pending = pending_reinforce_counts.get(node_id, 0)
+        if defense + pending * SQUAD_REINFORCE_VALUE >= max_defense:
+            continue
+        if not _opponent_will_need_node(state, player, node_id):
+            continue
+        candidates.append((_own_guard_priority(state, node_id), node_id))
+
+    if not candidates:
+        return ""
+    return max(candidates)[1]
+
+
+def _guard_max_defense(state: Any, node_id: str, guard: dict[str, Any]) -> int:
+    explicit = guard.get("maxDefense")
+    if explicit not in (None, ""):
+        return int(explicit)
+    return guard_max_defense(state, node_id)
+
+
+def _own_guard_priority(state: Any, node_id: str) -> int:
+    if node_id in OWN_GUARD_PRIORITY:
+        return OWN_GUARD_PRIORITY[node_id]
+    map_node = state.game_map.nodes.get(node_id)
+    node_type = str(
+        (map_node.raw if map_node else {}).get("nodeType")
+        or (map_node.raw if map_node else {}).get("type")
+        or ""
+    ).upper()
+    if node_type == "KEY_PASS":
+        return 100
+    if node_type == "GATE":
+        return 80
+    return 50
+
+
+def _opponent_will_need_node(state: Any, player: Any, node_id: str) -> bool:
+    for other in state.players.values():
+        if other.player_id == player.player_id or other.team_id == player.team_id:
+            continue
+        if not other.current_node_id:
+            continue
+        target = state.game_map.terminal_node_ids[0] if other.verified else state.game_map.gate_node_id
+        path = state.game_map.fastest_path(other.current_node_id, target)
+        if node_id in path[1:]:
+            return True
+    return False
 
 
 def _has_own_scout_marker(context: StrategyContext, target_node_id: str) -> bool:

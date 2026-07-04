@@ -40,6 +40,7 @@ def _state(
     nodes: Optional[list[dict[str, Any]]] = None,
     tasks: Optional[list[dict[str, Any]]] = None,
     events: Optional[list[dict[str, Any]]] = None,
+    action_results: Optional[list[dict[str, Any]]] = None,
     weather: Optional[dict[str, Any]] = None,
     extra_players: Optional[list[dict[str, Any]]] = None,
 ) -> GameState:
@@ -84,7 +85,7 @@ def _state(
             "events": events or [],
             "weather": weather or {},
             "contests": [],
-            "actionResults": [],
+            "actionResults": action_results or [],
         },
         1001,
         state.game_map,
@@ -255,6 +256,264 @@ class OptimizationStrategyTests(unittest.TestCase):
         self.assertEqual(
             [{"action": "SQUAD_WEAKEN", "targetNodeId": "S10"}],
             strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_squad_strategy_reinforces_own_wuguan_guard_before_scouting(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S10",
+            squad_available=2,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 6,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_squad_strategy_does_not_reinforce_guard_already_at_max_defense(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S10",
+            squad_available=8,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 6,
+                        "maxDefense": 6,
+                        "active": True,
+                    },
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S05",
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertNotEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S09"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_squad_strategy_does_not_overdispatch_pending_reinforcement(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S10",
+            squad_available=8,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 6,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        context = StrategyContext.from_state(state)
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S10"}],
+            strategy.decide(context),
+        )
+        self.assertEqual([], strategy.decide(context))
+
+    def test_squad_strategy_can_reinforce_again_after_reinforce_event(self) -> None:
+        strategy = SquadStrategy()
+        first_state = _state(
+            "S10",
+            squad_available=8,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 3,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy.on_start(first_state)
+
+        self.assertEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(first_state)),
+        )
+
+        next_state = _state(
+            "S10",
+            round_no=8,
+            squad_available=6,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 5,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                }
+            ],
+            events=[
+                {
+                    "type": "SQUAD_REINFORCE",
+                    "round": 7,
+                    "payload": {
+                        "playerId": 1001,
+                        "targetNodeId": "S10",
+                        "before": 3,
+                        "after": 5,
+                    },
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(next_state)),
+        )
+
+    def test_squad_strategy_releases_pending_reinforce_after_rejected_result_without_target(self) -> None:
+        strategy = SquadStrategy()
+        first_state = _state(
+            "S10",
+            squad_available=8,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 3,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy.on_start(first_state)
+
+        self.assertEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(first_state)),
+        )
+
+        rejected_state = _state(
+            "S10",
+            round_no=2,
+            squad_available=8,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 3,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                }
+            ],
+            action_results=[
+                {
+                    "round": 1,
+                    "playerId": 1001,
+                    "action": "SQUAD_REINFORCE",
+                    "accepted": False,
+                    "result": "ACTION_REJECTED",
+                    "errorCode": "SQUAD_NOT_ENOUGH",
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(rejected_state)),
         )
 
     def test_squad_strategy_can_repeat_weaken_until_route_edge_guard_is_expected_clear(self) -> None:
@@ -924,6 +1183,101 @@ class OptimizationStrategyTests(unittest.TestCase):
                     "teamId": "BLUE",
                     "state": "MOVING",
                     "currentNodeId": "S09",
+                    "nextNodeId": "S10",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
+            strategy.decide(state),
+        )
+
+    def test_wuguan_trap_waits_when_opponent_reroutes_from_luoyang_to_qinling(self) -> None:
+        state = _state(
+            "S10",
+            round_no=285,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "MOVING",
+                    "currentNodeId": "S09",
+                    "nextNodeId": "S08",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
+
+    def test_wuguan_trap_sets_guard_when_opponent_reaches_qinling_staging_node(self) -> None:
+        state = _state(
+            "S10",
+            round_no=292,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S08",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
+            strategy.decide(state),
+        )
+
+    def test_wuguan_trap_sets_guard_when_opponent_moves_from_qinling_to_wuguan(self) -> None:
+        state = _state(
+            "S10",
+            round_no=293,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "MOVING",
+                    "currentNodeId": "S08",
                     "nextNodeId": "S10",
                 }
             ],

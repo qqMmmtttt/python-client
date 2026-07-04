@@ -16,7 +16,7 @@ from .tasks import TaskStrategy
 # 方便后续新增策略时先判断应插入哪一层，而不是把逻辑塞进单个大文件。
 STRATEGY_PIPELINE_STAGES = (
     ("CombatStrategy", "窗口争夺：处理南岭驿等窗口牌局，不占主交付路线规划职责"),
-    ("SquadStrategy", "小分队：探路、清障、削弱设卡，和主车队动作并行"),
+    ("SquadStrategy", "小分队：探路、清障、增援己方设卡、削弱敌方设卡，和主车队动作并行"),
     ("TaskStrategy", "皇榜任务：在不影响主线交付的前提下领取/完成任务"),
     ("ResourceStrategy", "资源道具：领取并使用马、冰鉴、情报、船权等资源"),
     ("RushStrategy", "终局急策：宫宴冲刺阶段的加速/保护类急策"),
