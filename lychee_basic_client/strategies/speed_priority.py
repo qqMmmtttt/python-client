@@ -12,6 +12,7 @@ from lychee_basic_client.planning.estimates import estimate_path_rounds
 from lychee_basic_client.planning.route_profiles import FIRST_ROUND_WATER_ROUTE
 
 SPEED_PRIORITY_PROFILE = "speed-priority"
+FASTEST_WUGUAN_PROFILE = "fastest-wuguan"
 WUGUAN_NODE_ID = "S10"
 WUGUAN_RACE_BUFFER_ROUNDS = 8
 WUGUAN_GUARD_MIN_OPPONENT_ETA = 12
@@ -22,13 +23,22 @@ WUGUAN_RACE_ROUTE = FIRST_ROUND_WATER_ROUTE[
 
 
 def profile_is_speed_priority(profile_name: str) -> bool:
-    return profile_name == SPEED_PRIORITY_PROFILE
+    return profile_name in {SPEED_PRIORITY_PROFILE, FASTEST_WUGUAN_PROFILE}
 
 
 def route_policy_is_speed_priority(route_policy: Any) -> bool:
     if route_policy is None:
         return False
     checker = getattr(route_policy, "is_speed_priority", None)
+    if callable(checker):
+        return bool(checker())
+    return False
+
+
+def route_policy_uses_fastest_wuguan(route_policy: Any) -> bool:
+    if route_policy is None:
+        return False
+    checker = getattr(route_policy, "uses_fastest_wuguan_race", None)
     if callable(checker):
         return bool(checker())
     return False
@@ -66,11 +76,14 @@ def should_prioritize_wuguan(
     state: GameState,
     current_node_id: Optional[str],
 ) -> bool:
-    # 只有当前仍在水路竞速路线、且尚未到武关时，才启用抢武关约束。
+    # 抢武关约束分两种：固定水路线，或动态最快路到武关。
     if not route_policy_is_speed_priority(route_policy):
         return False
     if not current_node_id:
         return False
+    if route_policy_uses_fastest_wuguan(route_policy):
+        path = _path_to_wuguan(route_policy, state, current_node_id)
+        return len(path) >= 2 and path[-1] == WUGUAN_NODE_ID
     if not _water_race_route_available(state):
         return False
     current_index = _route_index(current_node_id)
@@ -83,9 +96,11 @@ def speed_priority_task_target_allowed(
     current_node_id: str,
     task_target: Any,
 ) -> bool:
-    # 竞速段只接受顺路任务；离开水路主线或消耗过多领先窗口的任务暂不做。
+    # 水路线竞速段只接受顺路任务；最快武关竞速段不做武关前任务。
     if not should_prioritize_wuguan(route_policy, state, current_node_id):
         return True
+    if route_policy_uses_fastest_wuguan(route_policy):
+        return False
     stand_node_id = str(getattr(task_target, "stand_node_id", "") or "")
     if not _is_forward_water_race_target(current_node_id, stand_node_id):
         return False
@@ -93,6 +108,7 @@ def speed_priority_task_target_allowed(
         return True
     process_round = int((getattr(task_target, "task", {}) or {}).get("processRound") or 5)
     return can_spend_before_wuguan(
+        route_policy,
         state,
         current_node_id,
         extra_rounds=process_round,
@@ -108,10 +124,13 @@ def speed_priority_claim_current_task_allowed(
 ) -> bool:
     if not should_prioritize_wuguan(route_policy, state, current_node_id):
         return True
+    if route_policy_uses_fastest_wuguan(route_policy):
+        return False
     if current_node_id == WUGUAN_NODE_ID:
         return True
     process_round = int(task.get("processRound") or 5)
     return can_spend_before_wuguan(
+        route_policy,
         state,
         current_node_id,
         extra_rounds=process_round,
@@ -129,6 +148,7 @@ def _wuguan_race_buffer_rounds(process_round: int) -> int:
 
 
 def can_spend_before_wuguan(
+    route_policy: Any,
     state: GameState,
     current_node_id: str,
     *,
@@ -138,13 +158,26 @@ def can_spend_before_wuguan(
     player = state.me
     if player is None:
         return False
-    my_eta = eta_to_wuguan_on_water_route(state, current_node_id)
+    my_eta = eta_to_wuguan(route_policy, state, current_node_id)
     if my_eta is None:
         return False
     opponent_eta = opponent_eta_to_wuguan(state, player)
     if opponent_eta is None:
         return True
     return my_eta + extra_rounds + buffer_rounds < opponent_eta
+
+
+def eta_to_wuguan(
+    route_policy: Any,
+    state: GameState,
+    current_node_id: str,
+) -> Optional[int]:
+    if route_policy_uses_fastest_wuguan(route_policy):
+        path = _path_to_wuguan(route_policy, state, current_node_id)
+        if len(path) < 2 or path[-1] != WUGUAN_NODE_ID:
+            return None
+        return estimate_path_rounds(state, path, include_process=True)
+    return eta_to_wuguan_on_water_route(state, current_node_id)
 
 
 def eta_to_wuguan_on_water_route(
@@ -193,6 +226,14 @@ def _water_race_route_available(state: GameState) -> bool:
         if right not in state.game_map.neighbors(left):
             return False
     return True
+
+
+def _path_to_wuguan(route_policy: Any, state: GameState, current_node_id: str) -> list[str]:
+    if current_node_id == WUGUAN_NODE_ID:
+        return [WUGUAN_NODE_ID]
+    if route_policy is not None and hasattr(route_policy, "path"):
+        return route_policy.path(state, current_node_id, WUGUAN_NODE_ID)
+    return state.game_map.fastest_path(current_node_id, WUGUAN_NODE_ID)
 
 
 def _is_forward_water_race_target(current_node_id: str, target_node_id: str) -> bool:

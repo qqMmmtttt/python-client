@@ -1027,6 +1027,11 @@ class DeliveryStrategy:
             return None
         if initial_transfer in self._object_busy_nodes:
             return None
+        fastest_wuguan = getattr(self._route_policy, "uses_fastest_wuguan_race", None)
+        if callable(fastest_wuguan) and fastest_wuguan():
+            planned_path = self._route_policy.path(state, current, state.game_map.gate_node_id)
+            if initial_transfer not in planned_path[1:]:
+                return None
         if current == state.game_map.start_node_id:
             return initial_transfer
         return None

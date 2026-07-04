@@ -101,6 +101,21 @@ class WeatherEventsRoutingTests(unittest.TestCase):
 
         self.assertEqual("S16", policy.next_hop(state, "S10", "S14"))
 
+    def test_fastest_wuguan_profile_uses_dynamic_fastest_path_before_wuguan(self) -> None:
+        state = _real_map_state("S01")
+        policy = RoutePolicy(
+            Config(
+                "127.0.0.1",
+                30000,
+                1001,
+                "red",
+                "0.1",
+                strategy_profile="fastest-wuguan",
+            )
+        )
+
+        self.assertEqual("S06", policy.next_hop(state, "S01", "S14"))
+
     def test_auto_route_can_switch_to_land_in_heavy_rain(self) -> None:
         state = _real_map_state("S02", weather={"active": [{"type": "HEAVY_RAIN"}]})
         policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="auto"))

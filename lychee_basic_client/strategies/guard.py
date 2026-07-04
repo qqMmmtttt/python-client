@@ -15,6 +15,7 @@ from lychee_basic_client.rules.guards import (
 )
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.speed_priority import (
+    FASTEST_WUGUAN_PROFILE,
     WUGUAN_GUARD_MIN_OPPONENT_ETA,
     WUGUAN_NODE_ID,
     opponent_eta_to_wuguan,
@@ -39,6 +40,7 @@ MIN_GUARD_SCORE = 80
 MIN_OPPONENT_ETA = 4
 MAX_OPPONENT_ETA = 180
 STRATEGY_PROFILE_WUGUAN_TRAP = "wuguan-trap"
+STRATEGY_PROFILE_FASTEST_WUGUAN = FASTEST_WUGUAN_PROFILE
 STRATEGY_PROFILE_SPEED_GUARD = "speed-guard"
 STRATEGY_PROFILE_BALANCED = "balanced"
 
@@ -54,7 +56,9 @@ class GuardStrategy:
     ) -> None:
         self._route_policy = route_policy
         self._strategy_profile = strategy_profile
-        self._wuguan_trap = WuguanTrapGuardPlan()
+        self._wuguan_trap = WuguanTrapGuardPlan(
+            enable_luoyang_stage=strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP
+        )
         self._attempted_nodes: set[str] = set()
         self._logger = get_logger("strategies.guard")
         self._flow = get_logger("guard_flow")
@@ -100,9 +104,11 @@ class GuardStrategy:
         player = state.me
         current = player.current_node_id if player else None
         is_wuguan = current == WUGUAN_NODE_ID
+        is_luoyang_wuguan_trap = self._strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP
+        is_fastest_wuguan_trap = self._strategy_profile == STRATEGY_PROFILE_FASTEST_WUGUAN
         is_trap_node = (
-            self._strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP
-            and current in {"S09", WUGUAN_NODE_ID}
+            (is_luoyang_wuguan_trap and current in {"S09", WUGUAN_NODE_ID})
+            or (is_fastest_wuguan_trap and current == WUGUAN_NODE_ID)
         )
         allow_rush_wuguan_trap = (
             state.phase == "RUSH"

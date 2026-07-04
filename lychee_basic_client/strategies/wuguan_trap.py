@@ -67,7 +67,8 @@ class WuguanTrapGuardPlan:
     3. 对手从 S09 直奔 S10，或经 S08 秦岭栈道接近 S10 时，最大投入在 S10 设卡。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, enable_luoyang_stage: bool = True) -> None:
+        self._enable_luoyang_stage = enable_luoyang_stage
         self._logger = get_logger("strategies.wuguan_trap")
         self._flow = get_logger("guard_flow")
         self._luoyang_guard_submitted = False
@@ -87,14 +88,14 @@ class WuguanTrapGuardPlan:
         active_guard_count: int,
     ) -> Optional[WuguanTrapDecision]:
         self._observe_own_guards(state, player)
-        if player.current_node_id == LUOYANG_NODE_ID:
+        if self._enable_luoyang_stage and player.current_node_id == LUOYANG_NODE_ID:
             return self._decide_at_luoyang(state, player, active_guard_count)
         if player.current_node_id == WUGUAN_NODE_ID:
             return self._decide_at_wuguan(state, player, active_guard_count)
         return None
 
     def _observe_own_guards(self, state: GameState, player: PlayerState) -> None:
-        if has_own_active_guard(state.nodes.get(LUOYANG_NODE_ID), player):
+        if self._enable_luoyang_stage and has_own_active_guard(state.nodes.get(LUOYANG_NODE_ID), player):
             self._luoyang_guard_seen_active = True
         if has_own_active_guard(state.nodes.get(WUGUAN_NODE_ID), player):
             self._wuguan_guard_submitted = True
@@ -195,18 +196,16 @@ class WuguanTrapGuardPlan:
         if enemy_guard_at(node, player) is not None:
             self._log("武关设卡跳过", state, player, "S10 已有敌方有效设卡")
             return None
-        if active_guard_count >= MAX_ACTIVE_OWN_GUARDS and not has_own_active_guard(
-            state.nodes.get(LUOYANG_NODE_ID), player
+        if active_guard_count >= MAX_ACTIVE_OWN_GUARDS and not (
+            self._enable_luoyang_stage
+            and has_own_active_guard(state.nodes.get(LUOYANG_NODE_ID), player)
         ):
             self._log("武关设卡跳过", state, player, "己方有效设卡已达到 2 个上限")
             return None
 
         approach_status = opponent_wuguan_approach_status(state, player)
         opponent_eta = opponent_eta_to_node(state, player, WUGUAN_NODE_ID)
-        if (
-            state.round_no >= force_set_round
-            and (self._luoyang_guard_submitted or self._luoyang_guard_seen_active)
-        ):
+        if state.round_no >= force_set_round and self._wuguan_wait_stage_active():
             reason = (
                 f"交付安全保护触发：计算截止轮 {force_set_round}，立即武关设卡后转入终点主线"
                 if deadline.triggered_by_safety
@@ -228,7 +227,7 @@ class WuguanTrapGuardPlan:
                 reason=approach_status.reason if approach_status.should_set_guard else "未形成洛阳阶段，直接补武关设卡",
             )
 
-        if self._luoyang_guard_submitted or self._luoyang_guard_seen_active:
+        if self._wuguan_wait_stage_active():
             if opponent_eta is None:
                 self._log(
                     "武关等待结束",
@@ -237,16 +236,26 @@ class WuguanTrapGuardPlan:
                     "未发现仍需经过武关的对手，停止等待并转入终点主线",
                 )
                 return None
-            wait_detail = approach_status.wait_detail or "等待对手从 S09 朝 S10 或 S08 方向继续推进"
+            wait_detail = approach_status.wait_detail or "等待对手进入武关前置路径"
             self._log(
                 "武关等待",
                 state,
                 player,
-                f"洛阳阶段已启动；{wait_detail}，当前对手到 S10 ETA={opponent_eta}，"
+                f"{self._wuguan_wait_stage_label()}；{wait_detail}，当前对手到 S10 ETA={opponent_eta}，"
                 f"武关等待截止轮={force_set_round}",
             )
             return WuguanTrapDecision(action=wait(), stage="wuguan_hold")
         return None
+
+    def _wuguan_wait_stage_active(self) -> bool:
+        if not self._enable_luoyang_stage:
+            return True
+        return self._luoyang_guard_submitted or self._luoyang_guard_seen_active
+
+    def _wuguan_wait_stage_label(self) -> str:
+        if self._enable_luoyang_stage:
+            return "洛阳阶段已启动"
+        return "最快武关策略已到达 S10"
 
     def _decide_with_active_wuguan_guard(
         self,
@@ -304,6 +313,8 @@ class WuguanTrapGuardPlan:
         player: PlayerState,
         opponent_eta: Optional[int],
     ) -> bool:
+        if not self._enable_luoyang_stage:
+            return False
         if self._luoyang_guard_submitted or self._luoyang_guard_seen_active:
             return False
         if opponent_eta is None:
@@ -366,7 +377,7 @@ class WuguanTrapGuardPlan:
         self._flow.important(
             "round=%s 【武关竞速｜%s】\n"
             "  我方：node=%s state=%s next=%s good=%s taskScore=%s totalScore=%s\n"
-            "  阶段：luoyangSubmitted=%s luoyangSeenActive=%s wuguanSubmitted=%s\n"
+            "  阶段：luoyangEnabled=%s luoyangSubmitted=%s luoyangSeenActive=%s wuguanSubmitted=%s\n"
             "  判断：%s",
             state.round_no,
             title,
@@ -376,6 +387,7 @@ class WuguanTrapGuardPlan:
             player.good_fruit,
             player.task_score,
             player.total_score,
+            self._enable_luoyang_stage,
             self._luoyang_guard_submitted,
             self._luoyang_guard_seen_active,
             self._wuguan_guard_submitted,

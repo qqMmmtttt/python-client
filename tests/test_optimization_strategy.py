@@ -125,6 +125,51 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual([], ResourceStrategy().decide(StrategyContext.from_state(state)))
 
+    def test_resource_strategy_uses_horse_when_enemy_guard_is_behind_route_edge(self) -> None:
+        state = _state(
+            "S02",
+            player_state="MOVING",
+            next_node_id="S04",
+            resources={"SHORT_HORSE": 1},
+            nodes=[
+                {
+                    "nodeId": "S01",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy = ResourceStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+
+        self.assertEqual(
+            [{"action": "USE_RESOURCE", "resourceType": "SHORT_HORSE"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_resource_strategy_does_not_use_horse_when_current_target_has_enemy_guard(self) -> None:
+        state = _state(
+            "S09",
+            player_state="MOVING",
+            next_node_id="S10",
+            resources={"FAST_HORSE": 1},
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy = ResourceStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
+
     def test_pipeline_uses_intel_before_fixed_process(self) -> None:
         state = _state("S13", round_no=450, resources={"INTEL": 1})
         strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
@@ -192,6 +237,81 @@ class OptimizationStrategyTests(unittest.TestCase):
         self.assertEqual(
             [{"action": "USE_RESOURCE", "resourceType": "FAST_HORSE"}],
             strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_fastest_wuguan_pipeline_moves_to_dynamic_fastest_route_without_water_scout(self) -> None:
+        state = _state("S01", squad_available=8)
+        strategy = build_strategy(
+            Config(
+                "127.0.0.1",
+                30000,
+                1001,
+                "red",
+                "0.1",
+                strategy_profile="fastest-wuguan",
+            )
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S06"}],
+            strategy.decide(state),
+        )
+
+    def test_fastest_wuguan_claims_short_horse_on_dynamic_route(self) -> None:
+        state = _state(
+            "S08",
+            nodes=[{"nodeId": "S08", "resourceStock": {"SHORT_HORSE": 1, "INTEL": 1}}],
+        )
+        strategy = ResourceStrategy(
+            RoutePolicy(
+                Config(
+                    "127.0.0.1",
+                    30000,
+                    1001,
+                    "red",
+                    "0.1",
+                    strategy_profile="fastest-wuguan",
+                )
+            )
+        )
+
+        self.assertEqual(
+            [{"action": "CLAIM_RESOURCE", "targetNodeId": "S08", "resourceType": "SHORT_HORSE"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_fastest_wuguan_skips_current_task_before_wuguan(self) -> None:
+        state = _state(
+            "S08",
+            tasks=[
+                {
+                    "taskId": "task-s08",
+                    "taskTemplateId": "T02",
+                    "nodeId": "S08",
+                    "score": 30,
+                    "processRound": 3,
+                    "active": True,
+                    "expireRound": 320,
+                }
+            ],
+            nodes=[{"nodeId": "S08", "hasObstacle": False, "resourceStock": {}}],
+        )
+        strategy = build_strategy(
+            Config(
+                "127.0.0.1",
+                30000,
+                1001,
+                "red",
+                "0.1",
+                strategy_profile="fastest-wuguan",
+            )
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S10"}],
+            strategy.decide(state),
         )
 
     def test_squad_strategy_reserves_initial_team_for_key_pass_guards(self) -> None:
@@ -1814,6 +1934,145 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual(
             [{"action": "MOVE", "targetNodeId": "S11"}],
+            strategy.decide(state),
+        )
+
+    def test_fastest_wuguan_profile_does_not_set_luoyang_guard(self) -> None:
+        state = _state(
+            "S09",
+            round_no=240,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S05",
+                }
+            ],
+        )
+        strategy = build_strategy(
+            Config(
+                "127.0.0.1",
+                30000,
+                1001,
+                "red",
+                "0.1",
+                strategy_profile="fastest-wuguan",
+            )
+        )
+        strategy.on_start(state)
+
+        self.assertEqual([{"action": "MOVE", "targetNodeId": "S10"}], strategy.decide(state))
+
+    def test_fastest_wuguan_profile_waits_at_wuguan_before_approach_window(self) -> None:
+        state = _state(
+            "S10",
+            round_no=260,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S05",
+                }
+            ],
+        )
+        strategy = build_strategy(
+            Config(
+                "127.0.0.1",
+                30000,
+                1001,
+                "red",
+                "0.1",
+                strategy_profile="fastest-wuguan",
+            )
+        )
+        strategy.on_start(state)
+
+        self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
+
+    def test_fastest_wuguan_profile_sets_guard_when_opponent_enters_wuguan_edge(self) -> None:
+        state = _state(
+            "S10",
+            round_no=285,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "MOVING",
+                    "currentNodeId": "S09",
+                    "nextNodeId": "S10",
+                }
+            ],
+        )
+        strategy = build_strategy(
+            Config(
+                "127.0.0.1",
+                30000,
+                1001,
+                "red",
+                "0.1",
+                strategy_profile="fastest-wuguan",
+            )
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
+            strategy.decide(state),
+        )
+
+    def test_fastest_wuguan_profile_sets_guard_at_wait_limit(self) -> None:
+        state = _state(
+            "S10",
+            round_no=500,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S05",
+                }
+            ],
+        )
+        strategy = build_strategy(
+            Config(
+                "127.0.0.1",
+                30000,
+                1001,
+                "red",
+                "0.1",
+                strategy_profile="fastest-wuguan",
+            )
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
             strategy.decide(state),
         )
 

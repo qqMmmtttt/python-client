@@ -63,8 +63,9 @@ class ResourceStrategy:
             return []
 
         if player.state in ROUTE_EDGE_STATES:
-            # 路线边只允许使用马类资源；若前方有敌方设卡，主车队动作让位给设卡处理。
-            if _has_adjacent_route_edge_guard(state, player):
+            # 路线边只允许使用马类资源；若当前目标或主线前方相邻点被设卡，
+            # 主车队动作让位给破关/削弱逻辑，避免把马浪费在错误方向上。
+            if _has_forward_route_edge_guard(state, player, self._route_policy):
                 return []
             return _horse_action_if_useful(
                 state,
@@ -189,13 +190,38 @@ def _horse_action_if_useful(
     return []
 
 
-def _has_adjacent_route_edge_guard(state: Any, player: Any) -> bool:
+def _has_forward_route_edge_guard(state: Any, player: Any, route_policy: Any) -> bool:
     if not player.current_node_id:
         return False
-    for node_id in state.game_map.neighbors(player.current_node_id):
-        if enemy_guard_at(state.nodes.get(node_id), player) is not None:
-            return True
+
+    # 当前移动目标被设卡时，马类资源也不能解决“无法接近目标”的问题。
+    if player.next_node_id and enemy_guard_at(state.nodes.get(player.next_node_id), player) is not None:
+        return True
+
+    # 旧版换道/恢复过程中，nextNodeId 可能指向临时支路；如果主线前方相邻点
+    # 已经被设卡，应停用马类，把动作留给设卡处理分支，不能加速冲向临时支路。
+    forward_neighbor = _forward_route_neighbor(state, player.current_node_id, route_policy)
+    if forward_neighbor and forward_neighbor != player.next_node_id:
+        return enemy_guard_at(state.nodes.get(forward_neighbor), player) is not None
     return False
+
+
+def _forward_route_neighbor(state: Any, current_node_id: str, route_policy: Any) -> Optional[str]:
+    target = state.game_map.gate_node_id
+    player = state.me
+    if player is not None and player.verified:
+        target = state.game_map.terminal_node_ids[0]
+
+    if route_policy is not None and hasattr(route_policy, "path"):
+        path = route_policy.path(state, current_node_id, target)
+    else:
+        path = state.game_map.fastest_path(current_node_id, target)
+    if len(path) < 2:
+        return None
+    candidate = path[1]
+    if candidate not in state.game_map.neighbors(current_node_id):
+        return None
+    return candidate
 
 
 def _has_active_t06(state: Any) -> bool:

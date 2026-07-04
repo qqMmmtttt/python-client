@@ -20,7 +20,7 @@ STRATEGY_PIPELINE_STAGES = (
     ("TaskStrategy", "皇榜任务：在不影响主线交付的前提下领取/完成任务"),
     ("ResourceStrategy", "资源道具：领取并使用马、冰鉴、情报、船权等资源"),
     ("RushStrategy", "终局急策：宫宴冲刺阶段的加速/保护类急策"),
-    ("GuardStrategy", "主动设卡：按 strategy_profile 选择洛阳-武关双段设卡、直设武关或保守设卡"),
+    ("GuardStrategy", "主动设卡：按 strategy_profile 选择洛阳-武关双段设卡、最快到武关后重复设卡、直设武关或保守设卡"),
     ("DeliveryStrategy", "主线交付：固定处理、验核、破障破关、移动和最终交付"),
 )
 

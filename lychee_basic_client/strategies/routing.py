@@ -10,7 +10,10 @@ from lychee_basic_client.planning.route_profiles import (
     FIRST_ROUND_WATER_ROUTE,
 )
 from lychee_basic_client.rules.blocking import enemy_guard_at, obstacle_residue_tax_round
-from lychee_basic_client.strategies.speed_priority import SPEED_PRIORITY_PROFILE
+from lychee_basic_client.strategies.speed_priority import (
+    FASTEST_WUGUAN_PROFILE,
+    SPEED_PRIORITY_PROFILE,
+)
 
 
 S02_NODE_ID = "S02"
@@ -19,7 +22,12 @@ WUGUAN_NODE_ID = "S10"
 
 class RoutePolicy:
     def __init__(self, config: Config) -> None:
-        self._profile_name = config.route_profile
+        self._strategy_profile = config.strategy_profile
+        self._profile_name = (
+            "auto"
+            if self._strategy_profile == FASTEST_WUGUAN_PROFILE
+            else config.route_profile
+        )
         self._alternate_route_active = False
         self._handled_contest_ids: set[str] = set()
         self._logger = get_logger("strategies.routing")
@@ -81,7 +89,12 @@ class RoutePolicy:
     def is_speed_priority(self) -> bool:
         if self._alternate_route_active:
             return False
-        return self._profile_name == SPEED_PRIORITY_PROFILE
+        return self._profile_name == SPEED_PRIORITY_PROFILE or self.uses_fastest_wuguan_race()
+
+    def uses_fastest_wuguan_race(self) -> bool:
+        if self._alternate_route_active:
+            return False
+        return self._strategy_profile == FASTEST_WUGUAN_PROFILE
 
     def is_alternate_route_active(self) -> bool:
         return self._alternate_route_active

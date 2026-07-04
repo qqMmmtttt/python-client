@@ -12,6 +12,7 @@ from lychee_basic_client.strategies.speed_priority import (
     WUGUAN_NODE_ID,
     WUGUAN_RACE_ROUTE,
     route_policy_is_speed_priority,
+    route_policy_uses_fastest_wuguan,
 )
 
 
@@ -513,6 +514,8 @@ def _scout_targets_for_context(
 ) -> tuple[str, ...]:
     if not route_policy_is_speed_priority(route_policy):
         return SCOUT_TARGETS
+    if route_policy_uses_fastest_wuguan(route_policy):
+        return ()
     state = context.state
     player = state.me
     current = player.current_node_id if player else None
