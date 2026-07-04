@@ -244,18 +244,13 @@ def _weaken_target_on_route(
             return player.next_node_id
 
     if player.state in ROUTE_EDGE_STATES and player.current_node_id:
-        for node_id in state.game_map.neighbors(player.current_node_id):
-            guard = enemy_guard_at(state.nodes.get(node_id), player)
-            if guard is None:
-                continue
-            if _should_dispatch_weaken(
-                context,
-                node_id,
-                guard.defense,
-                pending_weaken_counts,
-                force_until_clear=True,
-            ):
-                return node_id
+        forward_adjacent_target = _forward_adjacent_weaken_target(
+            context,
+            pending_weaken_counts,
+            route_policy,
+        )
+        if forward_adjacent_target:
+            return forward_adjacent_target
 
     target = state.game_map.terminal_node_ids[0] if player.verified else state.game_map.gate_node_id
     path = _route_path(state, player.current_node_id, target, route_policy)
@@ -267,6 +262,39 @@ def _weaken_target_on_route(
         if not _should_dispatch_weaken(context, node_id, guard.defense, pending_weaken_counts):
             continue
         return node_id
+    return ""
+
+
+def _forward_adjacent_weaken_target(
+    context: StrategyContext,
+    pending_weaken_counts: dict[str, int],
+    route_policy: Optional[RoutePolicy],
+) -> str:
+    state = context.state
+    player = state.me
+    if player is None or not player.current_node_id:
+        return ""
+
+    target = state.game_map.terminal_node_ids[0] if player.verified else state.game_map.gate_node_id
+    path = _route_path(state, player.current_node_id, target, route_policy)
+    if len(path) < 2:
+        return ""
+
+    neighbors = set(state.game_map.neighbors(player.current_node_id))
+    for node_id in path[1:]:
+        if node_id not in neighbors:
+            continue
+        guard = enemy_guard_at(state.nodes.get(node_id), player)
+        if guard is None:
+            continue
+        if _should_dispatch_weaken(
+            context,
+            node_id,
+            guard.defense,
+            pending_weaken_counts,
+            force_until_clear=True,
+        ):
+            return node_id
     return ""
 
 

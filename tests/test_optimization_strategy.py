@@ -271,6 +271,51 @@ class OptimizationStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(state)),
         )
 
+    def test_speed_priority_squad_ignores_enemy_guard_behind_route_edge(self) -> None:
+        strategy = SquadStrategy(
+            RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        )
+        state = _state(
+            "S02",
+            player_state="MOVING",
+            next_node_id="S04",
+            squad_available=6,
+            nodes=[
+                {
+                    "nodeId": "S01",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
+
+    def test_pipeline_does_not_weaken_start_guard_while_moving_to_dock(self) -> None:
+        state = _state(
+            "S02",
+            player_state="MOVING",
+            next_node_id="S04",
+            squad_available=6,
+            nodes=[
+                {
+                    "nodeId": "S01",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "BLUE", "defense": 6, "active": True},
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S04"}],
+            strategy.decide(state),
+        )
+
     def test_squad_strategy_reinforces_own_wuguan_guard_before_scouting(self) -> None:
         strategy = SquadStrategy()
         state = _state(
