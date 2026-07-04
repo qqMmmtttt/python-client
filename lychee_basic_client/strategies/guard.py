@@ -106,7 +106,10 @@ class GuardStrategy:
                 self._log_wuguan(state, current, "player_none_or_delivered",
                                  delivered=getattr(player, "delivered", None))
             return []
-        if state.phase == "RUSH" or player.state != "IDLE" or player.current_process:
+        node_waiting = player.state == "WAITING" and not player.next_node_id
+        if state.phase == "RUSH" or player.current_process or (
+            player.state != "IDLE" and not node_waiting
+        ):
             if is_wuguan:
                 self._log_wuguan(state, current, "not_idle_or_rush",
                                  phase=state.phase, player_state=player.state,

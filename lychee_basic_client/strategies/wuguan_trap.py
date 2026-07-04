@@ -27,6 +27,7 @@ WUGUAN_GUARD_RESERVE_GOOD_FRUIT = 6
 LUOYANG_MAX_USEFUL_OPPONENT_ETA = 150
 WUGUAN_HOLD_DELIVERY_MARGIN = 75
 WUGUAN_SET_DELIVERY_MARGIN = 65
+WUGUAN_FORCE_SET_ROUND = 400
 
 
 @dataclass(frozen=True)
@@ -175,6 +176,17 @@ class WuguanTrapGuardPlan:
 
         moving_from_luoyang = opponent_moving_from_luoyang_to_wuguan(state, player)
         opponent_eta = opponent_eta_to_node(state, player, WUGUAN_NODE_ID)
+        if (
+            state.round_no >= WUGUAN_FORCE_SET_ROUND
+            and (self._luoyang_guard_submitted or self._luoyang_guard_seen_active)
+        ):
+            return self._set_wuguan_guard(
+                state,
+                player,
+                opponent_eta=opponent_eta,
+                reason=f"已到 {WUGUAN_FORCE_SET_ROUND} 轮等待上限，立即武关设卡后转入终点主线",
+                allow_close_opponent=True,
+            )
         should_fallback_set = self._should_fallback_set_wuguan(state, player, opponent_eta)
         if moving_from_luoyang or should_fallback_set:
             return self._set_wuguan_guard(
@@ -217,6 +229,7 @@ class WuguanTrapGuardPlan:
         *,
         opponent_eta: Optional[int],
         reason: str,
+        allow_close_opponent: bool = False,
     ) -> Optional[WuguanTrapDecision]:
         extra = max_effective_extra_good_fruit(state, WUGUAN_NODE_ID)
         if not can_pay_guard(
@@ -233,7 +246,11 @@ class WuguanTrapGuardPlan:
                 f"好果不足，当前 {player.good_fruit}，无法支付武关基础成本和最大额外投入",
             )
             return None
-        if opponent_eta is not None and opponent_eta <= GUARD_PROCESS_ROUNDS:
+        if (
+            not allow_close_opponent
+            and opponent_eta is not None
+            and opponent_eta <= GUARD_PROCESS_ROUNDS
+        ):
             self._log(
                 "武关设卡跳过",
                 state,
