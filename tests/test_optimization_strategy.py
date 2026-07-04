@@ -833,6 +833,47 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
 
+    def test_wuguan_trap_keeps_waiting_before_round_400_even_when_old_margin_is_tight(self) -> None:
+        state = _state(
+            "S10",
+            round_no=356,
+            player_state="WAITING",
+            next_node_id=None,
+            task_score=60,
+            squad_available=0,
+            weather={
+                "active": [
+                    {
+                        "weatherId": "W_POLICY_03",
+                        "type": "HOT",
+                        "region": "ALL",
+                        "remainRound": 37,
+                    }
+                ]
+            },
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
+
     def test_wuguan_trap_sets_wuguan_guard_at_round_400_wait_limit(self) -> None:
         state = _state(
             "S10",

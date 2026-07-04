@@ -25,9 +25,9 @@ WUGUAN_NODE_ID = "S10"
 LUOYANG_GUARD_RESERVE_GOOD_FRUIT = 8
 WUGUAN_GUARD_RESERVE_GOOD_FRUIT = 6
 LUOYANG_MAX_USEFUL_OPPONENT_ETA = 150
-WUGUAN_HOLD_DELIVERY_MARGIN = 75
 WUGUAN_SET_DELIVERY_MARGIN = 65
 WUGUAN_FORCE_SET_ROUND = 400
+WUGUAN_DELIVERY_SAFETY_MARGIN = 8
 
 
 @dataclass(frozen=True)
@@ -176,15 +176,21 @@ class WuguanTrapGuardPlan:
 
         moving_from_luoyang = opponent_moving_from_luoyang_to_wuguan(state, player)
         opponent_eta = opponent_eta_to_node(state, player, WUGUAN_NODE_ID)
+        force_set_round = _wuguan_force_set_round(state, player)
         if (
-            state.round_no >= WUGUAN_FORCE_SET_ROUND
+            state.round_no >= force_set_round
             and (self._luoyang_guard_submitted or self._luoyang_guard_seen_active)
         ):
+            reason = (
+                f"已到 {WUGUAN_FORCE_SET_ROUND} 轮等待上限，立即武关设卡后转入终点主线"
+                if force_set_round >= WUGUAN_FORCE_SET_ROUND
+                else f"已到交付安全截止轮 {force_set_round}，立即武关设卡后转入终点主线"
+            )
             return self._set_wuguan_guard(
                 state,
                 player,
                 opponent_eta=opponent_eta,
-                reason=f"已到 {WUGUAN_FORCE_SET_ROUND} 轮等待上限，立即武关设卡后转入终点主线",
+                reason=reason,
                 allow_close_opponent=True,
             )
         should_fallback_set = self._should_fallback_set_wuguan(state, player, opponent_eta)
@@ -197,15 +203,14 @@ class WuguanTrapGuardPlan:
             )
 
         if self._luoyang_guard_submitted or self._luoyang_guard_seen_active:
-            if _has_delivery_slack(state, player, WUGUAN_NODE_ID, WUGUAN_HOLD_DELIVERY_MARGIN):
-                self._log(
-                    "武关等待",
-                    state,
-                    player,
-                    f"洛阳阶段已启动；等待对手从 S09 朝 S10 出发，当前对手到 S10 ETA={opponent_eta}",
-                )
-                return WuguanTrapDecision(action=wait(), stage="wuguan_hold")
-            self._log("武关等待结束", state, player, "交付安全余量不足，不再继续等待")
+            self._log(
+                "武关等待",
+                state,
+                player,
+                f"洛阳阶段已启动；等待对手从 S09 朝 S10 出发，当前对手到 S10 ETA={opponent_eta}，"
+                f"武关设卡截止轮={force_set_round}",
+            )
+            return WuguanTrapDecision(action=wait(), stage="wuguan_hold")
         return None
 
     def _should_fallback_set_wuguan(
@@ -381,3 +386,13 @@ def _has_delivery_slack(
     margin: int,
 ) -> bool:
     return state.round_no + estimate_delivery_rounds(state, current, player.verified) + margin < 600
+
+
+def _wuguan_force_set_round(state: GameState, player: PlayerState) -> int:
+    latest_safe_round = (
+        600
+        - GUARD_PROCESS_ROUNDS
+        - estimate_delivery_rounds(state, WUGUAN_NODE_ID, player.verified)
+        - WUGUAN_DELIVERY_SAFETY_MARGIN
+    )
+    return min(WUGUAN_FORCE_SET_ROUND, latest_safe_round)
