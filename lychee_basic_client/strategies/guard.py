@@ -117,13 +117,18 @@ class GuardStrategy:
             return []
 
         current = player.current_node_id
-        if not current or current in self._attempted_nodes:
+        is_trap_node = (
+            self._strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP
+            and current in {"S09", WUGUAN_NODE_ID}
+        )
+        trap_can_retry_wuguan = is_trap_node and current == WUGUAN_NODE_ID
+        if not current or (current in self._attempted_nodes and not trap_can_retry_wuguan):
             if is_wuguan:
                 self._log_wuguan(state, current, "already_attempted",
                                  in_attempted=current in self._attempted_nodes)
             return []
         active_count = active_own_guard_count(state, player)
-        if active_count >= MAX_ACTIVE_OWN_GUARDS:
+        if active_count >= MAX_ACTIVE_OWN_GUARDS and not is_trap_node:
             if is_wuguan:
                 self._log_wuguan(state, current, "max_guards_reached",
                                  active_count=active_count, max_guards=MAX_ACTIVE_OWN_GUARDS)
@@ -134,21 +139,22 @@ class GuardStrategy:
             if is_wuguan:
                 self._log_wuguan(state, current, "node_not_in_state")
             return []
+
+        if is_trap_node:
+            trap_decision = self._wuguan_trap_decision(state, player, current, active_count)
+            if trap_decision is not None:
+                action = trap_decision.action
+                if action.get("action") == "SET_GUARD" and not trap_can_retry_wuguan:
+                    self._attempted_nodes.add(current)
+                return [action]
+            return []
+
         has_own = has_active_guard(node)
         has_enemy = enemy_guard_at(node, player) is not None
         if has_own or has_enemy:
             if is_wuguan:
                 self._log_wuguan(state, current, "already_guarded",
                                  has_own=has_own, has_enemy=has_enemy)
-            return []
-
-        if self._strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP and current in {"S09", WUGUAN_NODE_ID}:
-            trap_decision = self._wuguan_trap_decision(state, player, current, active_count)
-            if trap_decision is not None:
-                action = trap_decision.action
-                if action.get("action") == "SET_GUARD":
-                    self._attempted_nodes.add(current)
-                return [action]
             return []
 
         speed_guard = self._speed_priority_wuguan_guard(state, player, current)

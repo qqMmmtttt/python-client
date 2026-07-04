@@ -82,6 +82,8 @@ class WuguanTrapGuardPlan:
             self._luoyang_guard_seen_active = True
         if has_own_active_guard(state.nodes.get(WUGUAN_NODE_ID), player):
             self._wuguan_guard_submitted = True
+        elif _own_wuguan_guard_removed_this_round(state, player):
+            self._wuguan_guard_submitted = False
 
     def _decide_at_luoyang(
         self,
@@ -169,8 +171,9 @@ class WuguanTrapGuardPlan:
         if node is None:
             self._log("武关设卡跳过", state, player, "服务器本轮未公开 S10 节点状态")
             return None
-        if self._wuguan_guard_submitted or has_own_active_guard(node, player):
-            return None
+        force_set_round = _wuguan_force_set_round(state, player)
+        if has_own_active_guard(node, player):
+            return self._decide_with_active_wuguan_guard(state, player, force_set_round)
         if enemy_guard_at(node, player) is not None:
             self._log("武关设卡跳过", state, player, "S10 已有敌方有效设卡")
             return None
@@ -182,7 +185,6 @@ class WuguanTrapGuardPlan:
 
         approach_status = opponent_wuguan_approach_status(state, player)
         opponent_eta = opponent_eta_to_node(state, player, WUGUAN_NODE_ID)
-        force_set_round = _wuguan_force_set_round(state, player)
         if (
             state.round_no >= force_set_round
             and (self._luoyang_guard_submitted or self._luoyang_guard_seen_active)
@@ -226,6 +228,56 @@ class WuguanTrapGuardPlan:
                 f"武关设卡截止轮={force_set_round}",
             )
             return WuguanTrapDecision(action=wait(), stage="wuguan_hold")
+        return None
+
+    def _decide_with_active_wuguan_guard(
+        self,
+        state: GameState,
+        player: PlayerState,
+        force_set_round: int,
+    ) -> Optional[WuguanTrapDecision]:
+        if state.round_no >= force_set_round:
+            self._log(
+                "武关等待结束",
+                state,
+                player,
+                f"己方武关设卡仍有效，但已到安全截止轮 {force_set_round}，转入终点主线",
+            )
+            return None
+
+        opponent_eta = opponent_eta_to_node(state, player, WUGUAN_NODE_ID)
+        approach_status = opponent_wuguan_approach_status(state, player)
+        recently_blocked = _opponent_recently_blocked_by_wuguan(state, player)
+        if recently_blocked or approach_status.should_set_guard or approach_status.wait_detail:
+            detail = (
+                "对手上一帧被武关设卡阻挡"
+                if recently_blocked
+                else approach_status.reason or approach_status.wait_detail
+            )
+            self._log(
+                "武关设卡后继续等待",
+                state,
+                player,
+                f"{detail}；己方武关设卡仍有效，等待其被消耗后再按窗口补设；"
+                f"opponentETA={opponent_eta}，安全截止轮={force_set_round}",
+            )
+            return WuguanTrapDecision(action=wait(), stage="wuguan_guard_hold")
+
+        if opponent_eta is not None and opponent_eta > 0:
+            self._log(
+                "武关设卡后继续等待",
+                state,
+                player,
+                f"对手仍需经过武关，ETA={opponent_eta}，安全截止轮={force_set_round}",
+            )
+            return WuguanTrapDecision(action=wait(), stage="wuguan_guard_hold")
+
+        self._log(
+            "武关等待结束",
+            state,
+            player,
+            "未发现对手仍处于武关前置路径或被武关设卡阻挡，转入终点主线",
+        )
         return None
 
     def _should_fallback_set_wuguan(
@@ -434,6 +486,60 @@ def _path_from_node_reaches_wuguan(
 
 def _is_own_player(other: PlayerState, player: PlayerState) -> bool:
     return other.player_id == player.player_id or other.team_id == player.team_id
+
+
+def _opponent_recently_blocked_by_wuguan(state: GameState, player: PlayerState) -> bool:
+    for other in state.players.values():
+        if _is_own_player(other, player):
+            continue
+        if _player_recently_blocked_by_wuguan(state, other.player_id):
+            return True
+    return False
+
+
+def _player_recently_blocked_by_wuguan(state: GameState, player_id: int) -> bool:
+    for result in state.action_results:
+        if result.get("playerId") != player_id:
+            continue
+        if result.get("action") != "MOVE":
+            continue
+        if result.get("accepted", True):
+            continue
+        error = str(result.get("errorCode") or result.get("result") or "")
+        if error != "MOVE_BLOCKED_BY_GUARD":
+            continue
+        target = str(result.get("targetNodeId") or "")
+        if not target or target == WUGUAN_NODE_ID:
+            return True
+
+    for event in state.events:
+        if event.get("type") not in {"ACTION_REJECTED", "INVALID_ACTION"}:
+            continue
+        payload = event.get("payload") or {}
+        if payload.get("playerId") != player_id:
+            continue
+        if payload.get("action") not in (None, "MOVE"):
+            continue
+        if payload.get("errorCode") != "MOVE_BLOCKED_BY_GUARD":
+            continue
+        target = str(payload.get("targetNodeId") or "")
+        if not target or target == WUGUAN_NODE_ID:
+            return True
+    return False
+
+
+def _own_wuguan_guard_removed_this_round(state: GameState, player: PlayerState) -> bool:
+    for event in state.events:
+        if event.get("type") not in {"GUARD_BREAK", "GUARD_INACTIVE"}:
+            continue
+        payload = event.get("payload") or {}
+        node_id = str(payload.get("nodeId") or payload.get("targetNodeId") or "")
+        if node_id != WUGUAN_NODE_ID:
+            continue
+        owner = str(payload.get("ownerTeamId") or payload.get("teamId") or "")
+        if not owner or owner == player.team_id:
+            return True
+    return False
 
 
 def _route_edge_remaining_rounds(player: PlayerState) -> Optional[int]:

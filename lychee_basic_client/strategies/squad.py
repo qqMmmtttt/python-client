@@ -8,10 +8,16 @@ from lychee_basic_client.rules.states import ROUTE_EDGE_STATES
 from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.routing import RoutePolicy
-from lychee_basic_client.strategies.speed_priority import route_policy_is_speed_priority
+from lychee_basic_client.strategies.speed_priority import (
+    WUGUAN_NODE_ID,
+    WUGUAN_RACE_ROUTE,
+    route_policy_is_speed_priority,
+)
 
 
 SCOUT_TARGETS = ("S04", "S05", "S11", "S13", "S14")
+SPEED_PRIORITY_SCOUT_TARGETS = ("S04", "S05")
+SPEED_PRIORITY_SQUAD_RESERVE = 6
 CRITICAL_GUARD_CAPS = {
     "S10": 7,
     "S11": 7,
@@ -142,7 +148,7 @@ class SquadStrategy:
                 )
             return []
 
-        for target in SCOUT_TARGETS:
+        for target in _scout_targets_for_context(context, self._route_policy):
             if target in self._dispatched_scout_targets:
                 continue
             if target not in state.game_map.nodes:
@@ -461,6 +467,29 @@ def _has_own_scout_marker(context: StrategyContext, target_node_id: str) -> bool
     return False
 
 
+def _scout_targets_for_context(
+    context: StrategyContext,
+    route_policy: Optional[RoutePolicy],
+) -> tuple[str, ...]:
+    if not route_policy_is_speed_priority(route_policy):
+        return SCOUT_TARGETS
+    state = context.state
+    player = state.me
+    current = player.current_node_id if player else None
+    if not current or current not in WUGUAN_RACE_ROUTE:
+        return ()
+    current_index = WUGUAN_RACE_ROUTE.index(current)
+    wuguan_index = WUGUAN_RACE_ROUTE.index(WUGUAN_NODE_ID)
+    if current_index >= wuguan_index:
+        return ()
+    return tuple(
+        target
+        for target in SPEED_PRIORITY_SCOUT_TARGETS
+        if target in WUGUAN_RACE_ROUTE
+        and current_index < WUGUAN_RACE_ROUTE.index(target) < wuguan_index
+    )
+
+
 def _route_path(
     state: Any,
     current: str,
@@ -490,7 +519,9 @@ def _squad_guard_reserve(
             continue
         reserve = max(reserve, _squad_people_to_remove_guard(cap))
     if route_policy_is_speed_priority(route_policy):
-        return min(4, reserve)
+        if reserve <= 0:
+            return SPEED_PRIORITY_SQUAD_RESERVE
+        return min(SPEED_PRIORITY_SQUAD_RESERVE, reserve)
     return min(8, reserve)
 
 
