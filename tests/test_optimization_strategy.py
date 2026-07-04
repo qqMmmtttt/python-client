@@ -470,6 +470,98 @@ class OptimizationStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(state)),
         )
 
+    def test_squad_strategy_prefers_higher_priority_guard_when_multiple_exist(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S09",
+            squad_available=2,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 3,
+                        "maxDefense": 6,
+                        "active": True,
+                    },
+                },
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 5,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                },
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "MOVING",
+                    "currentNodeId": "S09",
+                    "nextNodeId": "S10",
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
+    def test_squad_strategy_does_not_reinforce_lower_priority_guard_when_higher_is_full(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S09",
+            squad_available=2,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 3,
+                        "maxDefense": 6,
+                        "active": True,
+                    },
+                },
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 7,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                },
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "MOVING",
+                    "currentNodeId": "S09",
+                    "nextNodeId": "S10",
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
     def test_squad_strategy_does_not_reinforce_guard_already_at_max_defense(self) -> None:
         strategy = SquadStrategy()
         state = _state(

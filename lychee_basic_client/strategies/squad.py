@@ -331,24 +331,58 @@ def _reinforce_target_for_own_guard(
     if player is None:
         return ""
 
-    candidates: list[tuple[int, str]] = []
     for node_id, node in state.nodes.items():
         if not has_own_active_guard(node, player):
             pending_reinforce_counts.pop(node_id, None)
-            continue
-        guard = node.guard or {}
-        defense = int(guard.get("defense") or 0)
-        max_defense = _guard_max_defense(state, node_id, guard)
-        pending = pending_reinforce_counts.get(node_id, 0)
-        if not _should_reinforce_guard(defense, max_defense, pending):
-            continue
-        if not _opponent_pressure_reason_for_guard(state, player, node_id):
-            continue
-        candidates.append((_own_guard_priority(state, node_id), node_id))
 
+    # 存在多个己方设卡时，只增援优先级最高的关卡（如 S10 优先于 S09）。
+    # S09 即便风化，只要 S10 设卡仍有效，就不增援 S09，节省小分队人手。
+    target_node_id = _top_priority_own_guard_node(context)
+    if not target_node_id:
+        return ""
+
+    node = state.nodes.get(target_node_id)
+    guard = (node.guard if node else None) or {}
+    defense = int(guard.get("defense") or 0)
+    max_defense = _guard_max_defense(state, target_node_id, guard)
+    pending = pending_reinforce_counts.get(target_node_id, 0)
+    if not _should_reinforce_guard(defense, max_defense, pending):
+        return ""
+    if not _opponent_pressure_reason_for_guard(state, player, target_node_id):
+        return ""
+    return target_node_id
+
+
+def _top_priority_own_guard_node(context: StrategyContext) -> str:
+    """选择优先级最高的己方设卡节点；优先级相同时选距离最近的。"""
+    state = context.state
+    player = state.me
+    if player is None:
+        return ""
+
+    candidates: list[tuple[int, int, str]] = []
+    for node_id, node in state.nodes.items():
+        if not has_own_active_guard(node, player):
+            continue
+        candidates.append(
+            (
+                -_own_guard_priority(state, node_id),
+                _guard_distance_from_player(state, player, node_id),
+                node_id,
+            )
+        )
     if not candidates:
         return ""
-    return max(candidates)[1]
+    return min(candidates)[2]
+
+
+def _guard_distance_from_player(state: Any, player: Any, node_id: str) -> int:
+    if not getattr(player, "current_node_id", ""):
+        return 1_000_000_000
+    distance = state.game_map.route_distance(player.current_node_id, node_id)
+    if distance is None:
+        return 1_000_000_000
+    return distance
 
 
 def _should_reinforce_guard(defense: int, max_defense: int, pending: int) -> bool:
