@@ -1,19 +1,26 @@
 from typing import Any, Optional
 
-from lychee_basic_client.models.state import GameState, NodeState, PlayerState
+from lychee_basic_client.models.state import GameState, PlayerState
 from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.planning.estimates import estimate_delivery_rounds, estimate_path_rounds
 from lychee_basic_client.planning.tasks import TASK_SCORE_GOAL
 from lychee_basic_client.protocol.actions import set_guard
 from lychee_basic_client.rules.blocking import enemy_guard_at
+from lychee_basic_client.rules.guards import (
+    MAX_ACTIVE_OWN_GUARDS,
+    active_own_guard_count,
+    guard_base_good_fruit_cost,
+    has_active_guard,
+    max_effective_extra_good_fruit,
+)
 from lychee_basic_client.strategies.context import StrategyContext
 from lychee_basic_client.strategies.speed_priority import (
     WUGUAN_GUARD_MIN_OPPONENT_ETA,
     WUGUAN_NODE_ID,
     opponent_eta_to_wuguan,
     route_policy_is_speed_priority,
-    wuguan_guard_extra_good_fruit,
 )
+from lychee_basic_client.strategies.wuguan_trap import WuguanTrapGuardPlan
 
 
 KEY_GUARD_NODES = {
@@ -31,20 +38,30 @@ NODE_TYPE_GUARD_SCORE = {
 MIN_GUARD_SCORE = 80
 MIN_OPPONENT_ETA = 4
 MAX_OPPONENT_ETA = 180
-MAX_ACTIVE_OWN_GUARDS = 2
+STRATEGY_PROFILE_WUGUAN_TRAP = "wuguan-trap"
+STRATEGY_PROFILE_SPEED_GUARD = "speed-guard"
+STRATEGY_PROFILE_BALANCED = "balanced"
 
 
 class GuardStrategy:
     """主动设卡策略：在己方时间安全且能明显拖慢对手时消耗好果设卡。"""
 
-    def __init__(self, route_policy: Any = None) -> None:
+    def __init__(
+        self,
+        route_policy: Any = None,
+        *,
+        strategy_profile: str = STRATEGY_PROFILE_WUGUAN_TRAP,
+    ) -> None:
         self._route_policy = route_policy
+        self._strategy_profile = strategy_profile
+        self._wuguan_trap = WuguanTrapGuardPlan()
         self._attempted_nodes: set[str] = set()
         self._logger = get_logger("strategies.guard")
         self._flow = get_logger("guard_flow")
 
     def on_start(self, state: Any) -> None:
         self._attempted_nodes.clear()
+        self._wuguan_trap.on_start()
         return None
 
     def _log_wuguan(self, state: GameState, current: str, reason: str, **detail: Any) -> None:
@@ -102,7 +119,7 @@ class GuardStrategy:
                 self._log_wuguan(state, current, "already_attempted",
                                  in_attempted=current in self._attempted_nodes)
             return []
-        active_count = _active_own_guard_count(state, player)
+        active_count = active_own_guard_count(state, player)
         if active_count >= MAX_ACTIVE_OWN_GUARDS:
             if is_wuguan:
                 self._log_wuguan(state, current, "max_guards_reached",
@@ -114,7 +131,7 @@ class GuardStrategy:
             if is_wuguan:
                 self._log_wuguan(state, current, "node_not_in_state")
             return []
-        has_own = _has_active_guard(node)
+        has_own = has_active_guard(node)
         has_enemy = enemy_guard_at(node, player) is not None
         if has_own or has_enemy:
             if is_wuguan:
@@ -122,8 +139,18 @@ class GuardStrategy:
                                  has_own=has_own, has_enemy=has_enemy)
             return []
 
+        if self._strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP and current in {"S09", WUGUAN_NODE_ID}:
+            trap_decision = self._wuguan_trap_decision(state, player, current, active_count)
+            if trap_decision is not None:
+                action = trap_decision.action
+                if action.get("action") == "SET_GUARD":
+                    self._attempted_nodes.add(current)
+                return [action]
+            return []
+
         speed_guard = self._speed_priority_wuguan_guard(state, player, current)
         if speed_guard is not None:
+            self._attempted_nodes.add(current)
             return [speed_guard]
 
         # 非速度优先场景：先保证任务得分基础，再用剩余时间窗口主动设卡。
@@ -163,7 +190,7 @@ class GuardStrategy:
             return []
 
         extra_good_fruit = _extra_good_fruit_for_guard(state, player, current, candidate_score)
-        base_cost = _base_guard_cost(state, current)
+        base_cost = guard_base_good_fruit_cost(state, current)
         threshold = base_cost + extra_good_fruit + 18
         if player.good_fruit <= threshold:
             if is_wuguan:
@@ -188,6 +215,15 @@ class GuardStrategy:
         player: PlayerState,
         current: str,
     ) -> Optional[dict[str, Any]]:
+        if self._strategy_profile != STRATEGY_PROFILE_SPEED_GUARD:
+            if current == WUGUAN_NODE_ID:
+                self._log_wuguan(
+                    state,
+                    current,
+                    "profile_skip_direct_speed_guard",
+                    strategy_profile=self._strategy_profile,
+                )
+            return None
         if not route_policy_is_speed_priority(self._route_policy):
             if current == WUGUAN_NODE_ID:
                 self._log_wuguan(state, current, "not_speed_priority_profile")
@@ -218,8 +254,8 @@ class GuardStrategy:
                              min_required=WUGUAN_GUARD_MIN_OPPONENT_ETA)
             self._log_wuguan_opponents(state, current)
             return None
-        extra_good_fruit = wuguan_guard_extra_good_fruit(state, player)
-        base_cost = _base_guard_cost(state, current)
+        extra_good_fruit = max_effective_extra_good_fruit(state, current)
+        base_cost = guard_base_good_fruit_cost(state, current)
         threshold = base_cost + extra_good_fruit + 12
         if player.good_fruit <= threshold:
             self._log_wuguan(state, current, "not_enough_good_fruit_speed",
@@ -242,6 +278,19 @@ class GuardStrategy:
             player.good_fruit,
         )
         return set_guard(current, extra_good_fruit=extra_good_fruit)
+
+    def _wuguan_trap_decision(
+        self,
+        state: GameState,
+        player: PlayerState,
+        current: str,
+        active_count: int,
+    ) -> Optional[Any]:
+        return self._wuguan_trap.decide(
+            state,
+            player,
+            active_guard_count=active_count,
+        )
 
 
 def _delivery_has_guard_slack(state: GameState, player: PlayerState, current: str) -> bool:
@@ -291,42 +340,7 @@ def _extra_good_fruit_for_guard(
     current: str,
     candidate_score: int,
 ) -> int:
-    if (
-        current == "S10"
-        and candidate_score >= 110
-        and player.task_score >= 110
-        and player.good_fruit >= 45
-        and state.round_no < 360
-    ):
-        return 1
-    return 0
-
-
-def _base_guard_cost(state: GameState, current: str) -> int:
-    if current == state.game_map.gate_node_id:
-        return 1
-    map_node = state.game_map.nodes.get(current)
-    node_type = str(
-        (map_node.raw if map_node else {}).get("nodeType")
-        or (map_node.raw if map_node else {}).get("type")
-        or ""
-    ).upper()
-    return 1 if node_type == "KEY_PASS" else 0
-
-
-def _has_active_guard(node: Optional[NodeState]) -> bool:
-    guard = (node.guard if node else None) or {}
-    return bool(guard) and guard.get("active") is not False and int(guard.get("defense") or 0) > 0
-
-
-def _active_own_guard_count(state: GameState, player: PlayerState) -> int:
-    count = 0
-    for node in state.nodes.values():
-        guard = node.guard or {}
-        owner_team_id = str(guard.get("ownerTeamId") or guard.get("teamId") or "")
-        if owner_team_id == player.team_id and _has_active_guard(node):
-            count += 1
-    return count
+    return max_effective_extra_good_fruit(state, current)
 
 
 def _creates_large_bounty_risk(state: GameState, player: PlayerState) -> bool:

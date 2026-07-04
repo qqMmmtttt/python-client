@@ -193,7 +193,7 @@ def _action_priority(action: dict[str, Any]) -> int:
     if action_type == "CLAIM_TASK":
         return 100
     if action_type == "SET_GUARD":
-        return 92
+        return 108
     if action_type == "CLAIM_RESOURCE":
         return RESOURCE_CLAIM_PRIORITY.get(str(action.get("resourceType") or ""), 80)
     if action_type == "MOVE":

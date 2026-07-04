@@ -643,7 +643,7 @@ class OptimizationStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 1}],
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
             strategy.decide(state),
         )
 
@@ -667,7 +667,7 @@ class OptimizationStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "SET_GUARD", "targetNodeId": "S14", "extraGoodFruit": 0}],
+            [{"action": "SET_GUARD", "targetNodeId": "S14", "extraGoodFruit": 1}],
             strategy.decide(state),
         )
 
@@ -717,7 +717,7 @@ class OptimizationStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 1}],
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
             strategy.decide(state),
         )
 
@@ -741,7 +741,155 @@ class OptimizationStrategyTests(unittest.TestCase):
         strategy.on_start(state)
 
         self.assertEqual(
-            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 1}],
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
+            strategy.decide(state),
+        )
+
+    def test_wuguan_trap_sets_luoyang_guard_before_resource_pickup(self) -> None:
+        state = _state(
+            "S09",
+            round_no=230,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {"FAST_HORSE": 1}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S05",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S09", "extraGoodFruit": 2}],
+            strategy.decide(state),
+        )
+
+    def test_wuguan_trap_waits_at_wuguan_after_luoyang_guard(self) -> None:
+        state = _state(
+            "S10",
+            round_no=280,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                    "nextNodeId": None,
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
+
+    def test_wuguan_trap_sets_wuguan_guard_when_opponent_leaves_luoyang(self) -> None:
+        state = _state(
+            "S10",
+            round_no=285,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "MOVING",
+                    "currentNodeId": "S09",
+                    "nextNodeId": "S10",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
+            strategy.decide(state),
+        )
+
+    def test_wuguan_trap_does_not_set_wuguan_guard_when_opponent_too_close(self) -> None:
+        state = _state(
+            "S10",
+            round_no=285,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {"nodeId": "S09", "hasObstacle": False, "resourceStock": {}},
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "MOVING",
+                    "currentNodeId": "S09",
+                    "nextNodeId": "S10",
+                    "edgeProgressMs": 8000,
+                    "edgeTotalMs": 10000,
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S11"}],
+            strategy.decide(state),
+        )
+
+    def test_strategy_profile_can_disable_wuguan_trap(self) -> None:
+        state = _state(
+            "S10",
+            round_no=260,
+            task_score=60,
+            squad_available=0,
+            nodes=[{"nodeId": "S10", "hasObstacle": False, "resourceStock": {}}],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(
+            Config(
+                "127.0.0.1",
+                30000,
+                1001,
+                "red",
+                "0.1",
+                strategy_profile="balanced",
+            )
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "MOVE", "targetNodeId": "S11"}],
             strategy.decide(state),
         )
 

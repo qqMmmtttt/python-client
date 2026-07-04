@@ -12,6 +12,7 @@ class Config:
     log_dir: str = "logs"
     log_level: str = "INFO"
     route_profile: str = "speed-priority"
+    strategy_profile: str = "wuguan-trap"
 
 
 def parse_args() -> Config:
@@ -37,6 +38,15 @@ def parse_args() -> Config:
             "first-round-water forces the known water route."
         ),
     )
+    parser.add_argument(
+        "--strategy-profile",
+        choices=["wuguan-trap", "speed-guard", "balanced"],
+        default="wuguan-trap",
+        help=(
+            "Top-level strategy profile. wuguan-trap uses the staged S09/S10 guard race; "
+            "speed-guard keeps the direct Wuguan guard behavior; balanced uses conservative guards."
+        ),
+    )
     args = parser.parse_args()
     return Config(
         host=args.host,
@@ -47,4 +57,5 @@ def parse_args() -> Config:
         log_dir=args.log_dir,
         log_level=args.log_level,
         route_profile=args.route_profile,
+        strategy_profile=args.strategy_profile,
     )
