@@ -27,6 +27,7 @@ OWN_GUARD_PRIORITY = {
     "S11": 92,
     "S14": 88,
 }
+MOVE_BLOCKED_BY_GUARD = "MOVE_BLOCKED_BY_GUARD"
 
 
 class SquadStrategy:
@@ -56,6 +57,12 @@ class SquadStrategy:
         if player is None or player.delivered:
             return []
         if state.phase == "RUSH" or player.squad_available <= 0:
+            _log_weathered_guard_reinforce_skip(
+                self._logger,
+                context,
+                self._pending_reinforce_counts,
+                reason="宫宴冲刺阶段禁止新派小分队" if state.phase == "RUSH" else "小分队可用人数为 0",
+            )
             return []
 
         # reserve 是保留给后续关键设卡的最低人手，避免前期探路/清障把破关资源耗空。
@@ -100,6 +107,16 @@ class SquadStrategy:
                 self._pending_reinforce_counts[reinforce_target],
             )
             return [squad_reinforce(reinforce_target)]
+        _log_weathered_guard_reinforce_skip(
+            self._logger,
+            context,
+            self._pending_reinforce_counts,
+            reason=(
+                f"小分队可用人数 {player.squad_available}，不足 {SQUAD_REINFORCE_COST}"
+                if reinforce_target
+                else ""
+            ),
+        )
 
         # 普通道路障碍可提前派小分队清理，但不能动用预留给关键关卡的人手。
         clear_target = _clear_target_on_route(context, self._dispatched_clear_targets, self._route_policy)
@@ -290,7 +307,7 @@ def _reinforce_target_for_own_guard(
         pending = pending_reinforce_counts.get(node_id, 0)
         if defense + pending * SQUAD_REINFORCE_VALUE >= max_defense:
             continue
-        if not _opponent_will_need_node(state, player, node_id):
+        if not _opponent_pressure_reason_for_guard(state, player, node_id):
             continue
         candidates.append((_own_guard_priority(state, node_id), node_id))
 
@@ -322,17 +339,113 @@ def _own_guard_priority(state: Any, node_id: str) -> int:
     return 50
 
 
-def _opponent_will_need_node(state: Any, player: Any, node_id: str) -> bool:
+def _opponent_pressure_reason_for_guard(state: Any, player: Any, node_id: str) -> str:
     for other in state.players.values():
         if other.player_id == player.player_id or other.team_id == player.team_id:
             continue
         if not other.current_node_id:
             continue
+        if _recent_move_blocked_by_guard(state, other.player_id, node_id):
+            return f"对手 {other.player_id} 上帧 MOVE 被己方设卡阻挡"
+        if other.next_node_id == node_id:
+            return f"对手 {other.player_id} 当前朝向该节点"
         target = state.game_map.terminal_node_ids[0] if other.verified else state.game_map.gate_node_id
         path = state.game_map.fastest_path(other.current_node_id, target)
         if node_id in path[1:]:
+            return f"对手 {other.player_id} 后续最快路径仍需经过该节点"
+    return ""
+
+
+def _recent_move_blocked_by_guard(state: Any, opponent_player_id: int, node_id: str) -> bool:
+    for result in state.action_results:
+        if result.get("playerId") != opponent_player_id:
+            continue
+        if result.get("action") != "MOVE":
+            continue
+        if result.get("accepted", True):
+            continue
+        error = str(result.get("errorCode") or result.get("result") or "")
+        if error != MOVE_BLOCKED_BY_GUARD:
+            continue
+        target = str(result.get("targetNodeId") or "")
+        if not target or target == node_id:
+            return True
+
+    for event in state.events:
+        if event.get("type") not in {"ACTION_REJECTED", "INVALID_ACTION"}:
+            continue
+        payload = event.get("payload") or {}
+        if payload.get("playerId") != opponent_player_id:
+            continue
+        if payload.get("action") not in (None, "MOVE"):
+            continue
+        if payload.get("errorCode") != MOVE_BLOCKED_BY_GUARD:
+            continue
+        target = str(payload.get("targetNodeId") or "")
+        if not target or target == node_id:
             return True
     return False
+
+
+def _log_weathered_guard_reinforce_skip(
+    logger: Any,
+    context: StrategyContext,
+    pending_reinforce_counts: dict[str, int],
+    *,
+    reason: str = "",
+) -> None:
+    state = context.state
+    player = state.me
+    if player is None:
+        return
+    weathered_nodes = _weathered_guard_nodes(state)
+    for node_id in sorted(weathered_nodes):
+        node = state.nodes.get(node_id)
+        if not has_own_active_guard(node, player):
+            continue
+        guard = node.guard or {}
+        defense = int(guard.get("defense") or 0)
+        max_defense = _guard_max_defense(state, node_id, guard)
+        pending = pending_reinforce_counts.get(node_id, 0)
+        pressure_reason = _opponent_pressure_reason_for_guard(state, player, node_id)
+        skip_reason = reason
+        if not skip_reason and defense + pending * SQUAD_REINFORCE_VALUE >= max_defense:
+            skip_reason = "当前防守值加在途增援已达到防守上限"
+        if not skip_reason and not pressure_reason:
+            skip_reason = "未识别到对手仍需经过该节点或正被该节点设卡阻挡"
+        if not skip_reason:
+            continue
+        logger.important(
+            "squad_reinforce_skip round=%s target=%s defense=%s max=%s pending=%s available=%s reason=%s pressure=%s"
+            " | 小分队增援跳过：己方设卡刚发生风化，但本帧未派出增援。目标=%s，防守=%s/%s，在途增援=%s，可用小分队=%s，原因=%s，对手压力=%s",
+            state.round_no,
+            node_id,
+            defense,
+            max_defense,
+            pending,
+            player.squad_available,
+            skip_reason,
+            pressure_reason or "无",
+            node_id,
+            defense,
+            max_defense,
+            pending,
+            player.squad_available,
+            skip_reason,
+            pressure_reason or "无",
+        )
+
+
+def _weathered_guard_nodes(state: Any) -> set[str]:
+    nodes: set[str] = set()
+    for event in state.events:
+        if event.get("type") != "GUARD_WEATHERING":
+            continue
+        payload = event.get("payload") or {}
+        node_id = str(payload.get("nodeId") or payload.get("targetNodeId") or "")
+        if node_id:
+            nodes.add(node_id)
+    return nodes
 
 
 def _has_own_scout_marker(context: StrategyContext, target_node_id: str) -> bool:

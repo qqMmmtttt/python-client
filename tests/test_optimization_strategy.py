@@ -516,6 +516,69 @@ class OptimizationStrategyTests(unittest.TestCase):
             strategy.decide(StrategyContext.from_state(rejected_state)),
         )
 
+    def test_squad_strategy_reinforces_weathered_guard_when_opponent_move_is_blocked(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S10",
+            round_no=445,
+            player_state="MOVING",
+            next_node_id="S11",
+            squad_available=2,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 5,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                }
+            ],
+            events=[
+                {
+                    "type": "GUARD_WEATHERING",
+                    "round": 445,
+                    "payload": {"nodeId": "S10"},
+                },
+                {
+                    "type": "ACTION_REJECTED",
+                    "round": 445,
+                    "payload": {
+                        "playerId": 2002,
+                        "action": "MOVE",
+                        "errorCode": "MOVE_BLOCKED_BY_GUARD",
+                    },
+                },
+            ],
+            action_results=[
+                {
+                    "round": 444,
+                    "playerId": 2002,
+                    "action": "MOVE",
+                    "accepted": False,
+                    "result": "ACTION_REJECTED",
+                    "errorCode": "MOVE_BLOCKED_BY_GUARD",
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S10",
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SQUAD_REINFORCE", "targetNodeId": "S10"}],
+            strategy.decide(StrategyContext.from_state(state)),
+        )
+
     def test_squad_strategy_can_repeat_weaken_until_route_edge_guard_is_expected_clear(self) -> None:
         strategy = SquadStrategy()
         state = _state(
