@@ -100,6 +100,15 @@ class GuardStrategy:
         player = state.me
         current = player.current_node_id if player else None
         is_wuguan = current == WUGUAN_NODE_ID
+        is_trap_node = (
+            self._strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP
+            and current in {"S09", WUGUAN_NODE_ID}
+        )
+        allow_rush_wuguan_trap = (
+            state.phase == "RUSH"
+            and is_trap_node
+            and current == WUGUAN_NODE_ID
+        )
 
         if player is None or player.delivered:
             if is_wuguan:
@@ -107,7 +116,7 @@ class GuardStrategy:
                                  delivered=getattr(player, "delivered", None))
             return []
         node_waiting = player.state == "WAITING" and not player.next_node_id
-        if state.phase == "RUSH" or player.current_process or (
+        if (state.phase == "RUSH" and not allow_rush_wuguan_trap) or player.current_process or (
             player.state != "IDLE" and not node_waiting
         ):
             if is_wuguan:
@@ -117,10 +126,6 @@ class GuardStrategy:
             return []
 
         current = player.current_node_id
-        is_trap_node = (
-            self._strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP
-            and current in {"S09", WUGUAN_NODE_ID}
-        )
         trap_can_retry_wuguan = is_trap_node and current == WUGUAN_NODE_ID
         if not current or (current in self._attempted_nodes and not trap_can_retry_wuguan):
             if is_wuguan:

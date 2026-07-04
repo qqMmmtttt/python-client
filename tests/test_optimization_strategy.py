@@ -328,7 +328,7 @@ class OptimizationStrategyTests(unittest.TestCase):
                     "resourceStock": {},
                     "guard": {
                         "ownerTeamId": "RED",
-                        "defense": 6,
+                        "defense": 5,
                         "maxDefense": 7,
                         "active": True,
                     },
@@ -396,7 +396,7 @@ class OptimizationStrategyTests(unittest.TestCase):
                     "resourceStock": {},
                     "guard": {
                         "ownerTeamId": "RED",
-                        "defense": 6,
+                        "defense": 5,
                         "maxDefense": 7,
                         "active": True,
                     },
@@ -419,6 +419,55 @@ class OptimizationStrategyTests(unittest.TestCase):
             strategy.decide(context),
         )
         self.assertEqual([], strategy.decide(context))
+
+    def test_squad_strategy_does_not_reinforce_only_one_missing_defense(self) -> None:
+        strategy = SquadStrategy()
+        state = _state(
+            "S10",
+            round_no=445,
+            squad_available=2,
+            nodes=[
+                {
+                    "nodeId": "S10",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {
+                        "ownerTeamId": "RED",
+                        "defense": 6,
+                        "maxDefense": 7,
+                        "active": True,
+                    },
+                }
+            ],
+            events=[
+                {
+                    "type": "GUARD_WEATHERING",
+                    "round": 445,
+                    "payload": {"nodeId": "S10"},
+                }
+            ],
+            action_results=[
+                {
+                    "round": 444,
+                    "playerId": 2002,
+                    "action": "MOVE",
+                    "accepted": False,
+                    "result": "ACTION_REJECTED",
+                    "errorCode": "MOVE_BLOCKED_BY_GUARD",
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy.on_start(state)
+
+        self.assertEqual([], strategy.decide(StrategyContext.from_state(state)))
 
     def test_squad_strategy_can_reinforce_again_after_reinforce_event(self) -> None:
         strategy = SquadStrategy()
@@ -1355,6 +1404,50 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
 
+    def test_wuguan_trap_keeps_waiting_after_rush_starts_before_wait_limit(self) -> None:
+        state = _state(
+            "S10",
+            round_no=450,
+            phase="RUSH",
+            player_state="WAITING",
+            next_node_id=None,
+            task_score=60,
+            good_fruit=95,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 2, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            action_results=[
+                {
+                    "round": 449,
+                    "playerId": 2002,
+                    "action": "MOVE",
+                    "accepted": False,
+                    "result": "ACTION_REJECTED",
+                    "errorCode": "MOVE_BLOCKED_BY_GUARD",
+                }
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "MOVING",
+                    "currentNodeId": "S05",
+                    "nextNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
+
     def test_wuguan_trap_sets_wuguan_guard_at_round_500_wait_limit(self) -> None:
         state = _state(
             "S10",
@@ -1369,6 +1462,42 @@ class OptimizationStrategyTests(unittest.TestCase):
                     "hasObstacle": False,
                     "resourceStock": {},
                     "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual(
+            [{"action": "SET_GUARD", "targetNodeId": "S10", "extraGoodFruit": 2}],
+            strategy.decide(state),
+        )
+
+    def test_wuguan_trap_sets_wuguan_guard_in_rush_at_wait_limit(self) -> None:
+        state = _state(
+            "S10",
+            round_no=500,
+            phase="RUSH",
+            player_state="WAITING",
+            next_node_id=None,
+            task_score=60,
+            good_fruit=95,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 1, "active": True},
                 },
                 {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
             ],

@@ -339,7 +339,7 @@ def _reinforce_target_for_own_guard(
         defense = int(guard.get("defense") or 0)
         max_defense = _guard_max_defense(state, node_id, guard)
         pending = pending_reinforce_counts.get(node_id, 0)
-        if defense + pending * SQUAD_REINFORCE_VALUE >= max_defense:
+        if not _should_reinforce_guard(defense, max_defense, pending):
             continue
         if not _opponent_pressure_reason_for_guard(state, player, node_id):
             continue
@@ -348,6 +348,12 @@ def _reinforce_target_for_own_guard(
     if not candidates:
         return ""
     return max(candidates)[1]
+
+
+def _should_reinforce_guard(defense: int, max_defense: int, pending: int) -> bool:
+    effective_defense = defense + pending * SQUAD_REINFORCE_VALUE
+    missing = max_defense - effective_defense
+    return missing >= SQUAD_REINFORCE_VALUE
 
 
 def _guard_max_defense(state: Any, node_id: str, guard: dict[str, Any]) -> int:
@@ -443,8 +449,14 @@ def _log_weathered_guard_reinforce_skip(
         pending = pending_reinforce_counts.get(node_id, 0)
         pressure_reason = _opponent_pressure_reason_for_guard(state, player, node_id)
         skip_reason = reason
-        if not skip_reason and defense + pending * SQUAD_REINFORCE_VALUE >= max_defense:
+        effective_defense = defense + pending * SQUAD_REINFORCE_VALUE
+        missing = max_defense - effective_defense
+        if not skip_reason and missing <= 0:
             skip_reason = "当前防守值加在途增援已达到防守上限"
+        if not skip_reason and 0 < missing < SQUAD_REINFORCE_VALUE:
+            skip_reason = (
+                f"当前只缺 {missing} 点防守值，低于一次小分队增援 +{SQUAD_REINFORCE_VALUE} 的收益，暂不派出"
+            )
         if not skip_reason and not pressure_reason:
             skip_reason = "未识别到对手仍需经过该节点或正被该节点设卡阻挡"
         if not skip_reason:
