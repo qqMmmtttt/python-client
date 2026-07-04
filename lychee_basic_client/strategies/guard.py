@@ -122,7 +122,8 @@ class GuardStrategy:
                                  delivered=getattr(player, "delivered", None))
             return []
         node_waiting = player.state == "WAITING" and not player.next_node_id
-        if (state.phase == "RUSH" and not allow_rush_wuguan_trap) or player.current_process or (
+        allow_rush_s13_guard = state.phase == "RUSH" and current == "S13"
+        if (state.phase == "RUSH" and not allow_rush_wuguan_trap and not allow_rush_s13_guard) or player.current_process or (
             player.state != "IDLE" and not node_waiting
         ):
             if is_wuguan:
