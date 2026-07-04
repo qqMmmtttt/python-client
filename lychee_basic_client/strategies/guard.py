@@ -103,6 +103,16 @@ class GuardStrategy:
         state = context.state
         player = state.me
         current = player.current_node_id if player else None
+
+        # S13 灞桥驿独立设卡路径：到达即设卡，仅受物理条件限制，绕过 task_score/对手/时间窗口等流程约束
+        if (current == "S13" and player is not None and not player.delivered
+                and not player.current_process):
+            node_waiting = player.state == "WAITING" and not player.next_node_id
+            if player.state == "IDLE" or node_waiting:
+                s13_action = self._s13_independent_guard(state, player)
+                if s13_action is not None:
+                    return [s13_action]
+
         is_wuguan = current == WUGUAN_NODE_ID
         is_luoyang_wuguan_trap = self._strategy_profile == STRATEGY_PROFILE_WUGUAN_TRAP
         is_fastest_wuguan_trap = self._strategy_profile == STRATEGY_PROFILE_FASTEST_WUGUAN
@@ -312,6 +322,53 @@ class GuardStrategy:
             player,
             active_guard_count=active_count,
         )
+
+    def _s13_independent_guard(self, state: GameState, player: PlayerState) -> Optional[dict[str, Any]]:
+        """S13灞桥驿独立设卡：到达即设卡，仅受物理条件限制，绕过 task_score/对手/时间窗口等流程约束。"""
+        current = "S13"
+        active_count = active_own_guard_count(state, player)
+        if active_count >= MAX_ACTIVE_OWN_GUARDS:
+            self._flow.important(
+                "s13_guard_skip round=%s reason=max_guards active_count=%s max=%s"
+                " | S13设卡跳过：己方设卡已达上限",
+                state.round_no, active_count, MAX_ACTIVE_OWN_GUARDS,
+            )
+            return None
+        node = state.nodes.get(current)
+        if node is None:
+            self._flow.important(
+                "s13_guard_skip round=%s reason=node_not_found | S13设卡跳过：节点状态缺失",
+                state.round_no,
+            )
+            return None
+        has_own = has_active_guard(node)
+        has_enemy = enemy_guard_at(node, player) is not None
+        if has_own or has_enemy:
+            self._flow.important(
+                "s13_guard_skip round=%s reason=already_guarded has_own=%s has_enemy=%s"
+                " | S13设卡跳过：节点已有设卡",
+                state.round_no, has_own, has_enemy,
+            )
+            return None
+        extra_good_fruit = max_effective_extra_good_fruit(state, current)
+        base_cost = guard_base_good_fruit_cost(state, current)
+        if player.good_fruit <= base_cost + extra_good_fruit:
+            self._flow.important(
+                "s13_guard_skip round=%s reason=not_enough_good good=%s base_cost=%s extra=%s"
+                " | S13设卡跳过：好果不足",
+                state.round_no, player.good_fruit, base_cost, extra_good_fruit,
+            )
+            return None
+        self._flow.important(
+            "s13_guard_pass round=%s extra_good=%s good=%s base_cost=%s active_count=%s"
+            " | S13独立设卡：到达即设卡，仅受物理条件限制",
+            state.round_no, extra_good_fruit, player.good_fruit, base_cost, active_count,
+        )
+        self._logger.important(
+            "set_guard_s13 round=%s node=S13 extra_good=%s | S13灞桥驿设卡：到达即设卡（4帧处理，防守值=2+投入×2）",
+            state.round_no, extra_good_fruit,
+        )
+        return set_guard(current, extra_good_fruit=extra_good_fruit)
 
 
 def _delivery_has_guard_slack(state: GameState, player: PlayerState, current: str) -> bool:
