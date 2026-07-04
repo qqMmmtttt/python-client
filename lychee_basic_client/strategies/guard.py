@@ -35,7 +35,7 @@ MAX_ACTIVE_OWN_GUARDS = 2
 
 
 class GuardStrategy:
-    """Conservative guard placement after the scoring base is safe."""
+    """主动设卡策略：在己方时间安全且能明显拖慢对手时消耗好果设卡。"""
 
     def __init__(self, route_policy: Any = None) -> None:
         self._route_policy = route_policy
@@ -126,6 +126,7 @@ class GuardStrategy:
         if speed_guard is not None:
             return [speed_guard]
 
+        # 非速度优先场景：先保证任务得分基础，再用剩余时间窗口主动设卡。
         if player.task_score < TASK_SCORE_GOAL:
             if is_wuguan:
                 self._log_wuguan(state, current, "task_score_below_goal",

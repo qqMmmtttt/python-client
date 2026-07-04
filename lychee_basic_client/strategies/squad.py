@@ -21,7 +21,7 @@ SQUAD_WEAKEN_VALUE = 2
 
 
 class SquadStrategy:
-    """Independent small-team actions that should not block the main convoy."""
+    """小分队策略：产出可与主车队并行动作的探路、清障和削弱设卡决策。"""
 
     def __init__(self, route_policy: Optional[RoutePolicy] = None) -> None:
         self._route_policy = route_policy
@@ -44,8 +44,10 @@ class SquadStrategy:
         if state.phase == "RUSH" or player.squad_available <= 0:
             return []
 
+        # reserve 是保留给后续关键设卡的最低人手，避免前期探路/清障把破关资源耗空。
         reserve = _squad_guard_reserve(context, self._route_policy)
 
+        # 已经被敌方设卡挡住时，削弱设卡优先级最高；该动作不占 main 类别。
         weaken_target = _weaken_target_on_route(context, self._pending_weaken_counts, self._route_policy)
         if weaken_target and player.squad_available >= 2:
             self._pending_weaken_counts[weaken_target] = self._pending_weaken_counts.get(weaken_target, 0) + 1
@@ -60,6 +62,7 @@ class SquadStrategy:
             )
             return [squad_weaken(weaken_target)]
 
+        # 普通道路障碍可提前派小分队清理，但不能动用预留给关键关卡的人手。
         clear_target = _clear_target_on_route(context, self._dispatched_clear_targets, self._route_policy)
         if clear_target and player.squad_available - SQUAD_WEAKEN_COST >= reserve:
             self._dispatched_clear_targets.add(clear_target)

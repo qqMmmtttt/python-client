@@ -36,7 +36,7 @@ from lychee_basic_client.strategies.speed_priority import (
 
 
 class DeliveryStrategy:
-    """End-to-end S14 verification and S15 delivery decisions."""
+    """主交付策略：负责移动、固定处理、验核、阻挡处理和最终交付。"""
 
     def __init__(self, route_policy: RoutePolicy) -> None:
         self._route_policy = route_policy
@@ -90,6 +90,8 @@ class DeliveryStrategy:
             return []
 
         if player.state in ROUTE_EDGE_STATES:
+            # 路线边状态只能提交协议允许的移动/等待/马类资源等动作。
+            # 一旦目标节点被敌方设卡，进入专门的路线边设卡处理分支。
             if player.next_node_id:
                 return self._decide_while_moving(state, player)
             self._logger.important(
@@ -142,10 +144,12 @@ class DeliveryStrategy:
                 return []
             return [self._move(terminal)]
 
+        # 先处理必经站点的固定流程。固定处理完成前离站会导致后续交付条件不完整。
         process_action = self._process_action_if_needed(state, current)
         if process_action:
             return [process_action]
 
+        # 任务和资源都不能越过必经处理点；缺少必经处理时优先回到主线。
         mandatory_target = self._mandatory_process_target(state, current)
         if mandatory_target is not None:
             next_node = self._route_policy.next_hop(state, current, mandatory_target)
@@ -162,6 +166,7 @@ class DeliveryStrategy:
         if adjacent_guard_decision is not None:
             return [adjacent_guard_decision.action] if adjacent_guard_decision.action else []
 
+        # 皇榜任务只在不破坏主交付节奏时插入；速度优先 profile 会进一步限制武关前任务。
         task_target = select_task_target(state, current, self._rejected_task_ids)
         if task_target is not None and not speed_priority_task_target_allowed(
             self._route_policy,
@@ -197,6 +202,7 @@ class DeliveryStrategy:
         if next_node is None:
             return []
 
+        # MOVE 之前必须检查下一节点的障碍/敌方设卡；被阻挡时先清障、破关或强制通行。
         blocking_decision = self._blocking_decision_if_needed(state, next_node)
         if blocking_decision is not None:
             self._logger.important(

@@ -8,6 +8,7 @@ from lychee_basic_client.observability.logging_setup import get_logger
 from lychee_basic_client.protocol.actions import action_message
 from lychee_basic_client.protocol.framing import encode_frame, read_frame_with_meta
 from lychee_basic_client.protocol.messages import ready_message, registration_message
+from lychee_basic_client.public_info import PublicInformationManager, PublicStateRecorder
 from lychee_basic_client.strategies.factory import build_strategy
 
 
@@ -19,6 +20,8 @@ class ClientSession:
         self._state: Optional[GameState] = None
         self._logger = get_logger("runtime.session")
         self._last_phase: str = ""
+        self._public_info = PublicInformationManager()
+        self._public_recorder = PublicStateRecorder(config.log_dir)
 
     def run(self) -> int:
         self._send_registration()
@@ -70,6 +73,8 @@ class ClientSession:
 
     def _handle_start(self, data: dict[str, Any]) -> None:
         self._state = GameState.from_start(data, self._config.player_id)
+        self._public_info.clear()
+        self._record_public_state("start")
         self._strategy.on_start(self._state)
         self._last_phase = self._state.phase
         self._logger.important(
@@ -93,6 +98,7 @@ class ClientSession:
             return
 
         self._state = GameState.from_inquire(data, self._config.player_id, self._state.game_map)
+        self._record_public_state("inquire")
         self._log_phase_transition()
         self._log_key_events()
         actions = self._strategy.decide(self._state)
@@ -211,6 +217,25 @@ class ClientSession:
         frame = encode_frame(message)
         self._log_wire("outbound", message, frame[:5], len(frame) - 5)
         self._sock.sendall(frame)
+
+    def _record_public_state(self, source: str) -> None:
+        if self._state is None:
+            return
+        try:
+            snapshot = self._public_info.update(self._state)
+            path = self._public_recorder.record(snapshot, source=source)
+            self._logger.trace(
+                "public_state_recorded round=%s source=%s path=%s",
+                self._state.round_no,
+                source,
+                path,
+            )
+        except Exception:
+            self._logger.exception(
+                "failed to record public state round=%s source=%s",
+                self._state.round_no,
+                source,
+            )
 
     def _log_wire(
         self,

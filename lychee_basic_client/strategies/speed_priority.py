@@ -1,9 +1,15 @@
+"""速度优先策略的公共判断函数。
+
+这一组函数不直接产出动作，只回答“当前是否仍处在抢武关窗口”“是否允许
+为了任务偏离主线”“对手到武关还需要多久”等问题。Delivery/Resource/
+Guard/Squad 等策略共同引用这里，避免各模块重复写一套竞速判断。
+"""
+
 from typing import Any, Optional
 
 from lychee_basic_client.models.state import GameState, PlayerState
 from lychee_basic_client.planning.estimates import estimate_path_rounds
 from lychee_basic_client.planning.route_profiles import FIRST_ROUND_WATER_ROUTE
-
 
 SPEED_PRIORITY_PROFILE = "speed-priority"
 WUGUAN_NODE_ID = "S10"
@@ -41,6 +47,7 @@ def should_skip_task_for_wuguan_guard(
     state: GameState,
     current_node_id: str,
 ) -> bool:
+    # 到达武关但尚未建立己方设卡时，任务领取应让位于 GuardStrategy。
     if not route_policy_is_speed_priority(route_policy):
         return False
     if current_node_id != WUGUAN_NODE_ID:
@@ -59,6 +66,7 @@ def should_prioritize_wuguan(
     state: GameState,
     current_node_id: Optional[str],
 ) -> bool:
+    # 只有当前仍在水路竞速路线、且尚未到武关时，才启用抢武关约束。
     if not route_policy_is_speed_priority(route_policy):
         return False
     if not current_node_id:
@@ -75,6 +83,7 @@ def speed_priority_task_target_allowed(
     current_node_id: str,
     task_target: Any,
 ) -> bool:
+    # 竞速段只接受顺路任务；离开水路主线或消耗过多领先窗口的任务暂不做。
     if not should_prioritize_wuguan(route_policy, state, current_node_id):
         return True
     stand_node_id = str(getattr(task_target, "stand_node_id", "") or "")

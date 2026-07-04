@@ -34,6 +34,7 @@ class SessionSmokeTests(unittest.TestCase):
 
         trace_text = ""
         important_text = ""
+        public_state_text = ""
         with tempfile.TemporaryDirectory() as tmp_dir:
             setup_logging(tmp_dir, "ERROR")
             thread = threading.Thread(target=server.run)
@@ -41,7 +42,7 @@ class SessionSmokeTests(unittest.TestCase):
             try:
                 result = ClientSession(
                     client_sock,
-                    Config("127.0.0.1", 30000, 1006, "BasicPy", "0.1"),
+                    Config("127.0.0.1", 30000, 1006, "BasicPy", "0.1", log_dir=tmp_dir),
                 ).run()
             finally:
                 client_sock.close()
@@ -49,6 +50,9 @@ class SessionSmokeTests(unittest.TestCase):
                 _close_package_handlers()
                 trace_text = (Path(tmp_dir) / "trace.log").read_text(encoding="utf-8")
                 important_text = (Path(tmp_dir) / "important.log").read_text(encoding="utf-8")
+                public_state_text = (
+                    Path(tmp_dir) / "public_state" / "round_0001.txt"
+                ).read_text(encoding="utf-8")
 
         self.assertEqual(0, result)
         self.assertEqual("registration", server.received[0]["msg_name"])
@@ -59,6 +63,8 @@ class SessionSmokeTests(unittest.TestCase):
         self.assertIn("wire direction=inbound msg_name=start", trace_text)
         self.assertIn("body_bytes=", trace_text)
         self.assertIn("decision round=1 strategy=none actions=[]", important_text)
+        self.assertIn("第 0001 轮公开状态档案", public_state_text)
+        self.assertIn("二、玩家信息", public_state_text)
 
     def test_in_game_error_does_not_close_session_before_next_inquire(self) -> None:
         client_sock, server_sock = socket.socketpair()
@@ -95,7 +101,7 @@ class SessionSmokeTests(unittest.TestCase):
             try:
                 result = ClientSession(
                     client_sock,
-                    Config("127.0.0.1", 30000, 1006, "BasicPy", "0.1"),
+                    Config("127.0.0.1", 30000, 1006, "BasicPy", "0.1", log_dir=tmp_dir),
                 ).run()
             finally:
                 client_sock.close()

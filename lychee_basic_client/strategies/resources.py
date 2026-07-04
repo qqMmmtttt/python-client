@@ -43,7 +43,7 @@ RESOURCE_PICKUP_MARGIN = {
 
 
 class ResourceStrategy:
-    """Resource pickup and inventory-use decisions."""
+    """资源策略：决定何时领取资源、何时使用马/冰鉴/情报等道具。"""
 
     def __init__(self, route_policy: Any = None) -> None:
         self._route_policy = route_policy
@@ -63,6 +63,7 @@ class ResourceStrategy:
             return []
 
         if player.state in ROUTE_EDGE_STATES:
+            # 路线边只允许使用马类资源；若前方有敌方设卡，主车队动作让位给设卡处理。
             if _has_adjacent_route_edge_guard(state, player):
                 return []
             return _horse_action_if_useful(
@@ -94,6 +95,8 @@ class ResourceStrategy:
 
         speed_race = _speed_priority_race(state, player, self._route_policy)
 
+        # 速度优先段：马类资源用于压缩到武关的时间；其他 profile 下会保留马给
+        # T06 等高价值任务窗口，避免提前浪费。
         horse_action = (
             []
             if _is_unprocessed_transfer_node(state)
@@ -134,6 +137,8 @@ class ResourceStrategy:
         ):
             node = state.nodes.get(player.current_node_id)
             if node:
+                # 资源领取按“对当前策略价值”排序；领取动作是 main 类别，会和移动、
+                # 破关等动作冲突，所以必须先确认交付时间仍安全。
                 resource_types = sorted(
                     USEFUL_PICKUPS,
                     key=lambda item: _pickup_sort_key(state, player, item),

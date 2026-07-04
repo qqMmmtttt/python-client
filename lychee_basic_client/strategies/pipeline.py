@@ -9,6 +9,8 @@ from .context import StrategyContext
 
 
 class StrategyPipeline:
+    """逐层运行策略，并把多个策略产出的动作合并成服务器允许的一帧动作列表。"""
+
     def __init__(self, strategies: list[Strategy]) -> None:
         self._strategies = strategies
         self._logger = get_logger("strategies.pipeline")
@@ -49,6 +51,11 @@ class StrategyPipeline:
                             action,
                         )
                     return []
+
+                # 动作合并规则：
+                # - 主车队动作共用 main 类别，一帧只能保留一个。
+                # - 小分队、窗口争夺可以和 main 并行。
+                # - 同类别冲突时，高优先级动作替换低优先级动作。
                 categories = _action_categories(action)
                 priority = _action_priority(action)
                 conflicts = [
