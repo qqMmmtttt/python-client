@@ -28,6 +28,7 @@ WUGUAN_SET_DELIVERY_MARGIN = 65
 WUGUAN_FORCE_SET_ROUND = 500
 WUGUAN_DELIVERY_SAFETY_MARGIN = 8
 WUGUAN_DELIVERY_SAFETY_LIMIT_ENABLED = False
+WUGUAN_ABANDON_OPPONENT_ETA = 8
 
 
 @dataclass(frozen=True)
@@ -74,11 +75,13 @@ class WuguanTrapGuardPlan:
         self._luoyang_guard_submitted = False
         self._luoyang_guard_seen_active = False
         self._wuguan_guard_submitted = False
+        self._wuguan_abandoned = False
 
     def on_start(self) -> None:
         self._luoyang_guard_submitted = False
         self._luoyang_guard_seen_active = False
         self._wuguan_guard_submitted = False
+        self._wuguan_abandoned = False
 
     def decide(
         self,
@@ -88,6 +91,8 @@ class WuguanTrapGuardPlan:
         active_guard_count: int,
     ) -> Optional[WuguanTrapDecision]:
         self._observe_own_guards(state, player)
+        if self._wuguan_abandoned:
+            return None
         if self._enable_luoyang_stage and player.current_node_id == LUOYANG_NODE_ID:
             return self._decide_at_luoyang(state, player, active_guard_count)
         if player.current_node_id == WUGUAN_NODE_ID:
@@ -273,6 +278,25 @@ class WuguanTrapGuardPlan:
             return None
 
         opponent_eta = opponent_eta_to_node(state, player, WUGUAN_NODE_ID)
+
+        guard_node = state.nodes.get(WUGUAN_NODE_ID)
+        guard = (guard_node.guard if guard_node else None) or {}
+        defense = int(guard.get("defense") or 0)
+        if (
+            defense <= 1
+            and opponent_eta is not None
+            and opponent_eta <= WUGUAN_ABANDON_OPPONENT_ETA
+        ):
+            self._wuguan_abandoned = True
+            self._log(
+                "武关提前出发",
+                state,
+                player,
+                f"己方武关设卡防守值仅剩 {defense}，对方ETA={opponent_eta} ≤ {WUGUAN_ABANDON_OPPONENT_ETA}，"
+                f"来不及重新设卡，提前出发去终点并彻底放弃后续武关设卡",
+            )
+            return None
+
         approach_status = opponent_wuguan_approach_status(state, player)
         recently_blocked = _opponent_recently_blocked_by_wuguan(state, player)
         if recently_blocked or approach_status.should_set_guard or approach_status.wait_detail:
