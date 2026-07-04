@@ -179,7 +179,7 @@ class GuardStrategy:
                 self._log_wuguan(state, current, "task_score_below_goal",
                                  task_score=player.task_score, goal=TASK_SCORE_GOAL)
             return []
-        if state.round_no >= 420:
+        if state.round_no >= 420 and current != "S13":
             if is_wuguan:
                 self._log_wuguan(state, current, "round_too_late_normal",
                                  round_no=state.round_no, limit=420)
@@ -314,7 +314,10 @@ class GuardStrategy:
 
 
 def _delivery_has_guard_slack(state: GameState, player: PlayerState, current: str) -> bool:
-    margin = 100 if current != state.game_map.gate_node_id else 70
+    if current == "S13":
+        margin = 8
+    else:
+        margin = 100 if current != state.game_map.gate_node_id else 70
     return state.round_no + estimate_delivery_rounds(
         state,
         current,
