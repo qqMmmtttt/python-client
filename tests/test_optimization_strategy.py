@@ -930,6 +930,45 @@ class OptimizationStrategyTests(unittest.TestCase):
             self.assertNotIn("【设卡处理｜启动换道复位】", guard_log)
             self.assertNotIn("每帧决策摘要", guard_log)
 
+    def test_guard_log_records_wuguan_deadline_calculation_when_safety_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            setup_logging(tmp_dir, "ERROR")
+            state = _state(
+                "S10",
+                round_no=420,
+                player_state="WAITING",
+                next_node_id=None,
+                task_score=60,
+                squad_available=0,
+                nodes=[
+                    {
+                        "nodeId": "S09",
+                        "hasObstacle": False,
+                        "resourceStock": {},
+                        "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                    },
+                    {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+                ],
+                extra_players=[
+                    {
+                        "playerId": 2002,
+                        "teamId": "BLUE",
+                        "state": "IDLE",
+                        "currentNodeId": "S09",
+                    }
+                ],
+            )
+            strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+            strategy.on_start(state)
+            self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
+            _close_package_handlers()
+
+            guard_log = (Path(tmp_dir) / "guard.log").read_text(encoding="utf-8")
+            self.assertIn("【武关竞速｜交付安全截止计算】", guard_log)
+            self.assertIn("交付安全保护已计算但入口关闭", guard_log)
+            self.assertIn("latestSafeRound = 600 - 设卡读条", guard_log)
+            self.assertIn("本轮采用武关等待截止轮=500", guard_log)
+
     def test_pipeline_does_not_let_intel_preempt_delivery_move(self) -> None:
         state = _state(
             "S09",
@@ -1213,7 +1252,7 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
 
-    def test_wuguan_trap_keeps_waiting_before_round_400_even_when_old_margin_is_tight(self) -> None:
+    def test_wuguan_trap_keeps_waiting_before_new_wait_limit_even_when_old_margin_is_tight(self) -> None:
         state = _state(
             "S10",
             round_no=356,
@@ -1254,10 +1293,72 @@ class OptimizationStrategyTests(unittest.TestCase):
 
         self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
 
-    def test_wuguan_trap_sets_wuguan_guard_at_round_400_wait_limit(self) -> None:
+    def test_wuguan_trap_waits_at_round_400_before_new_wait_limit(self) -> None:
         state = _state(
             "S10",
             round_no=400,
+            player_state="WAITING",
+            next_node_id=None,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
+
+    def test_wuguan_trap_ignores_delivery_safety_limit_when_disabled(self) -> None:
+        state = _state(
+            "S10",
+            round_no=420,
+            player_state="WAITING",
+            next_node_id=None,
+            task_score=60,
+            squad_available=0,
+            nodes=[
+                {
+                    "nodeId": "S09",
+                    "hasObstacle": False,
+                    "resourceStock": {},
+                    "guard": {"ownerTeamId": "RED", "defense": 6, "active": True},
+                },
+                {"nodeId": "S10", "hasObstacle": False, "resourceStock": {}},
+            ],
+            extra_players=[
+                {
+                    "playerId": 2002,
+                    "teamId": "BLUE",
+                    "state": "IDLE",
+                    "currentNodeId": "S09",
+                }
+            ],
+        )
+        strategy = build_strategy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+        strategy.on_start(state)
+
+        self.assertEqual([{"action": "WAIT"}], strategy.decide(state))
+
+    def test_wuguan_trap_sets_wuguan_guard_at_round_500_wait_limit(self) -> None:
+        state = _state(
+            "S10",
+            round_no=500,
             player_state="WAITING",
             next_node_id=None,
             task_score=60,
@@ -1458,7 +1559,7 @@ class OptimizationStrategyTests(unittest.TestCase):
     def test_wuguan_trap_leaves_active_wuguan_guard_at_wait_limit(self) -> None:
         state = _state(
             "S10",
-            round_no=400,
+            round_no=500,
             task_score=60,
             squad_available=0,
             nodes=[

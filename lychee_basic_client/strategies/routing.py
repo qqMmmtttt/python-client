@@ -14,6 +14,7 @@ from lychee_basic_client.strategies.speed_priority import SPEED_PRIORITY_PROFILE
 
 
 S02_NODE_ID = "S02"
+WUGUAN_NODE_ID = "S10"
 
 
 class RoutePolicy:
@@ -101,10 +102,14 @@ class RoutePolicy:
         if self._profile_name == "auto":
             return []
         if self._alternate_route_active:
+            if _route_has_reached_node(ALTERNATE_ROUTE_AFTER_S02_LOSS, current, WUGUAN_NODE_ID):
+                return []
             return _profile_path(
                 game_map, ALTERNATE_ROUTE_AFTER_S02_LOSS, current, target
             )
         if self._profile_name in {"first-round-safe", "first-round-water", SPEED_PRIORITY_PROFILE}:
+            if _route_has_reached_node(FIRST_ROUND_WATER_ROUTE, current, WUGUAN_NODE_ID):
+                return []
             return _profile_path(game_map, FIRST_ROUND_WATER_ROUTE, current, target)
         return []
 
@@ -143,6 +148,12 @@ def _profile_path(
     if current_index >= target_index:
         return []
     return route[current_index : target_index + 1]
+
+
+def _route_has_reached_node(route: list[str], current: str, node_id: str) -> bool:
+    if current not in route or node_id not in route:
+        return False
+    return route.index(current) >= route.index(node_id)
 
 
 def _route_profile_available(game_map: GameMap, route: list[str]) -> bool:

@@ -88,6 +88,19 @@ class WeatherEventsRoutingTests(unittest.TestCase):
 
         self.assertEqual("S04", policy.next_hop(state, "S02", "S14"))
 
+    def test_speed_priority_profile_uses_dynamic_fastest_path_after_wuguan(self) -> None:
+        state = _real_map_state(
+            "S10",
+            extra_nodes=[{"nodeId": "S16", "type": "STATION"}],
+            extra_edges=[
+                {"fromNodeId": "S10", "toNodeId": "S16", "routeType": "ROAD", "distance": 1},
+                {"fromNodeId": "S16", "toNodeId": "S14", "routeType": "ROAD", "distance": 1},
+            ],
+        )
+        policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1"))
+
+        self.assertEqual("S16", policy.next_hop(state, "S10", "S14"))
+
     def test_auto_route_can_switch_to_land_in_heavy_rain(self) -> None:
         state = _real_map_state("S02", weather={"active": [{"type": "HEAVY_RAIN"}]})
         policy = RoutePolicy(Config("127.0.0.1", 30000, 1001, "red", "0.1", route_profile="auto"))
@@ -166,15 +179,22 @@ def _final_like_state(
     )
 
 
-def _real_map_state(node_id: str, weather: dict | None = None) -> GameState:
+def _real_map_state(
+    node_id: str,
+    weather: dict | None = None,
+    extra_nodes: list[dict] | None = None,
+    extra_edges: list[dict] | None = None,
+) -> GameState:
     map_config = json.loads(Path("example_data/map_config.json").read_text(encoding="utf-8"))
+    nodes = [*map_config["nodes"], *(extra_nodes or [])]
+    edges = [*map_config["edges"], *(extra_edges or [])]
     return GameState.from_start(
         {
             "matchId": "match-real-map",
             "round": 1,
             "phase": "NORMAL",
-            "nodes": map_config["nodes"],
-            "edges": map_config["edges"],
+            "nodes": nodes,
+            "edges": edges,
             "processNodes": map_config["processNodes"],
             "players": [
                 {"playerId": 1001, "teamId": "RED", "state": "IDLE", "currentNodeId": node_id}

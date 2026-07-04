@@ -25,8 +25,9 @@ LUOYANG_GUARD_RESERVE_GOOD_FRUIT = 8
 WUGUAN_GUARD_RESERVE_GOOD_FRUIT = 6
 LUOYANG_MAX_USEFUL_OPPONENT_ETA = 150
 WUGUAN_SET_DELIVERY_MARGIN = 65
-WUGUAN_FORCE_SET_ROUND = 400
+WUGUAN_FORCE_SET_ROUND = 500
 WUGUAN_DELIVERY_SAFETY_MARGIN = 8
+WUGUAN_DELIVERY_SAFETY_LIMIT_ENABLED = False
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,21 @@ class WuguanApproachStatus:
     should_set_guard: bool
     reason: str
     wait_detail: str = ""
+
+
+@dataclass(frozen=True)
+class WuguanDeadline:
+    selected_round: int
+    hard_limit_round: int
+    safety_enabled: bool
+    latest_safe_round: int
+    delivery_estimate_rounds: int
+    guard_process_rounds: int
+    safety_margin: int
+
+    @property
+    def triggered_by_safety(self) -> bool:
+        return self.safety_enabled and self.selected_round < self.hard_limit_round
 
 
 class WuguanTrapGuardPlan:
@@ -171,7 +187,9 @@ class WuguanTrapGuardPlan:
         if node is None:
             self._log("武关设卡跳过", state, player, "服务器本轮未公开 S10 节点状态")
             return None
-        force_set_round = _wuguan_force_set_round(state, player)
+        deadline = _wuguan_deadline(state, player)
+        self._log_deadline(state, player, deadline)
+        force_set_round = deadline.selected_round
         if has_own_active_guard(node, player):
             return self._decide_with_active_wuguan_guard(state, player, force_set_round)
         if enemy_guard_at(node, player) is not None:
@@ -190,9 +208,9 @@ class WuguanTrapGuardPlan:
             and (self._luoyang_guard_submitted or self._luoyang_guard_seen_active)
         ):
             reason = (
-                f"已到 {WUGUAN_FORCE_SET_ROUND} 轮等待上限，立即武关设卡后转入终点主线"
-                if force_set_round >= WUGUAN_FORCE_SET_ROUND
-                else f"已到交付安全截止轮 {force_set_round}，立即武关设卡后转入终点主线"
+                f"交付安全保护触发：计算截止轮 {force_set_round}，立即武关设卡后转入终点主线"
+                if deadline.triggered_by_safety
+                else f"已到 {WUGUAN_FORCE_SET_ROUND} 轮等待硬上限，立即武关设卡后转入终点主线"
             )
             return self._set_wuguan_guard(
                 state,
@@ -225,7 +243,7 @@ class WuguanTrapGuardPlan:
                 state,
                 player,
                 f"洛阳阶段已启动；{wait_detail}，当前对手到 S10 ETA={opponent_eta}，"
-                f"武关设卡截止轮={force_set_round}",
+                f"武关等待截止轮={force_set_round}",
             )
             return WuguanTrapDecision(action=wait(), stage="wuguan_hold")
         return None
@@ -241,7 +259,7 @@ class WuguanTrapGuardPlan:
                 "武关等待结束",
                 state,
                 player,
-                f"己方武关设卡仍有效，但已到安全截止轮 {force_set_round}，转入终点主线",
+                f"己方武关设卡仍有效，但已到武关等待截止轮 {force_set_round}，转入终点主线",
             )
             return None
 
@@ -259,7 +277,7 @@ class WuguanTrapGuardPlan:
                 state,
                 player,
                 f"{detail}；己方武关设卡仍有效，等待其被消耗后再按窗口补设；"
-                f"opponentETA={opponent_eta}，安全截止轮={force_set_round}",
+                f"opponentETA={opponent_eta}，武关等待截止轮={force_set_round}",
             )
             return WuguanTrapDecision(action=wait(), stage="wuguan_guard_hold")
 
@@ -268,7 +286,7 @@ class WuguanTrapGuardPlan:
                 "武关设卡后继续等待",
                 state,
                 player,
-                f"对手仍需经过武关，ETA={opponent_eta}，安全截止轮={force_set_round}",
+                f"对手仍需经过武关，ETA={opponent_eta}，武关等待截止轮={force_set_round}",
             )
             return WuguanTrapDecision(action=wait(), stage="wuguan_guard_hold")
 
@@ -372,6 +390,56 @@ class WuguanTrapGuardPlan:
             player.next_node_id,
             detail,
         )
+
+    def _log_deadline(self, state: GameState, player: PlayerState, deadline: WuguanDeadline) -> None:
+        if deadline.triggered_by_safety:
+            result = "交付安全保护已触发，采用安全截止轮"
+        elif deadline.safety_enabled:
+            result = "交付安全保护已启用，但硬上限更早，采用硬上限"
+        else:
+            result = "交付安全保护已计算但入口关闭，采用硬上限"
+        self._flow.important(
+            "round=%s 【武关竞速｜交付安全截止计算】\n"
+            "  我方：node=%s state=%s next=%s verified=%s\n"
+            "  配置：等待硬上限=%s，交付安全保护启用=%s\n"
+            "  公式：latestSafeRound = 600 - 设卡读条(%s) - 预计交付耗时(%s) - 安全余量(%s) = %s\n"
+            "  结果：本轮采用武关等待截止轮=%s；%s",
+            state.round_no,
+            player.current_node_id,
+            player.state,
+            player.next_node_id,
+            player.verified,
+            deadline.hard_limit_round,
+            deadline.safety_enabled,
+            deadline.guard_process_rounds,
+            deadline.delivery_estimate_rounds,
+            deadline.safety_margin,
+            deadline.latest_safe_round,
+            deadline.selected_round,
+            result,
+        )
+        self._logger.important(
+            "wuguan_deadline_calc round=%s hard_limit=%s safety_enabled=%s delivery_estimate=%s "
+            "guard_process=%s safety_margin=%s latest_safe_round=%s selected_round=%s triggered=%s",
+            state.round_no,
+            deadline.hard_limit_round,
+            deadline.safety_enabled,
+            deadline.delivery_estimate_rounds,
+            deadline.guard_process_rounds,
+            deadline.safety_margin,
+            deadline.latest_safe_round,
+            deadline.selected_round,
+            deadline.triggered_by_safety,
+        )
+        if deadline.triggered_by_safety:
+            self._flow.important(
+                "round=%s 【武关竞速｜交付安全保护触发】\n"
+                "  触发条件：latestSafeRound=%s 早于等待硬上限=%s\n"
+                "  后续动作：本轮及之后不再继续武关等待，转入设卡后离开或直接离开主线",
+                state.round_no,
+                deadline.latest_safe_round,
+                deadline.hard_limit_round,
+            )
 
 
 def opponent_wuguan_approach_status(
@@ -570,10 +638,28 @@ def _has_delivery_slack(
 
 
 def _wuguan_force_set_round(state: GameState, player: PlayerState) -> int:
+    return _wuguan_deadline(state, player).selected_round
+
+
+def _wuguan_deadline(state: GameState, player: PlayerState) -> WuguanDeadline:
+    delivery_estimate_rounds = estimate_delivery_rounds(state, WUGUAN_NODE_ID, player.verified)
     latest_safe_round = (
         600
         - GUARD_PROCESS_ROUNDS
-        - estimate_delivery_rounds(state, WUGUAN_NODE_ID, player.verified)
+        - delivery_estimate_rounds
         - WUGUAN_DELIVERY_SAFETY_MARGIN
     )
-    return min(WUGUAN_FORCE_SET_ROUND, latest_safe_round)
+    selected_round = (
+        min(WUGUAN_FORCE_SET_ROUND, latest_safe_round)
+        if WUGUAN_DELIVERY_SAFETY_LIMIT_ENABLED
+        else WUGUAN_FORCE_SET_ROUND
+    )
+    return WuguanDeadline(
+        selected_round=selected_round,
+        hard_limit_round=WUGUAN_FORCE_SET_ROUND,
+        safety_enabled=WUGUAN_DELIVERY_SAFETY_LIMIT_ENABLED,
+        latest_safe_round=latest_safe_round,
+        delivery_estimate_rounds=delivery_estimate_rounds,
+        guard_process_rounds=GUARD_PROCESS_ROUNDS,
+        safety_margin=WUGUAN_DELIVERY_SAFETY_MARGIN,
+    )
