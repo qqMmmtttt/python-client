@@ -28,6 +28,7 @@ KEY_GUARD_NODES = {
     "S10": 120,
     "S11": 92,
     "S14": 88,
+    "S13": 85,
 }
 NODE_TYPE_GUARD_SCORE = {
     "KEY_PASS": 112,

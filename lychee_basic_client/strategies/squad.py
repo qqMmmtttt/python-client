@@ -33,6 +33,7 @@ OWN_GUARD_PRIORITY = {
     "S09": 110,
     "S11": 92,
     "S14": 88,
+    "S13": 85,
 }
 MOVE_BLOCKED_BY_GUARD = "MOVE_BLOCKED_BY_GUARD"
 
